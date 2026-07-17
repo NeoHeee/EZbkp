@@ -24,6 +24,8 @@ import androidx.fragment.app.FragmentActivity;
 
 public class SecuritySettingsActivity extends FragmentActivity {
     private TextView currentMode;
+    private Button relockButton;
+    private Button screenOffButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -50,7 +52,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
         root.addView(title, fullWrap(dp(8)));
 
         TextView description = new TextView(this);
-        description.setText("选择进入 EZ记账 时使用的验证方式。启用后，冷启动以及应用在后台停留一段时间后返回，都需要重新验证。");
+        description.setText("选择进入 EZ记账 时使用的验证方式，并设置从后台返回或熄屏后的自动锁定策略。");
         description.setTextSize(14.5f);
         description.setTextColor(Color.rgb(80, 95, 95));
         description.setLineSpacing(0, 1.15f);
@@ -62,8 +64,18 @@ public class SecuritySettingsActivity extends FragmentActivity {
         currentMode.setTypeface(null, android.graphics.Typeface.BOLD);
         currentMode.setPadding(dp(16), dp(14), dp(16), dp(14));
         currentMode.setBackground(roundedBox(Color.WHITE, Color.rgb(196, 210, 208), 14));
-        root.addView(currentMode, fullWrap(dp(22)));
-        refreshCurrentMode();
+        root.addView(currentMode, fullWrap(dp(18)));
+
+        relockButton = optionButton("自动锁定时间", "设置 App 切到后台后多长时间重新验证");
+        root.addView(relockButton, fullWrap(dp(12)));
+        relockButton.setOnClickListener(v -> chooseRelockTimeout());
+
+        screenOffButton = optionButton("熄屏后立即锁定", "手机变为非交互状态后，下次进入立即验证");
+        root.addView(screenOffButton, fullWrap(dp(20)));
+        screenOffButton.setOnClickListener(v -> toggleScreenOffLock());
+
+        TextView methodTitle = sectionTitle("验证方式");
+        root.addView(methodTitle, fullWrap(dp(10)));
 
         Button biometric = optionButton("指纹或面容", "调用 Android 系统生物识别，不保存生物特征数据");
         root.addView(biometric, fullWrap(dp(12)));
@@ -82,13 +94,23 @@ public class SecuritySettingsActivity extends FragmentActivity {
         disable.setOnClickListener(v -> confirmDisable());
 
         TextView note = new TextView(this);
-        note.setText("提示：如果选择生物识别，请确保系统中已录入指纹或面容。删除系统中的全部生物识别后，可能无法通过该方式进入应用。");
+        note.setText("提示：连续输错 PIN 或图形后会进入递增等待时间。若选择生物识别，请确保系统中已录入指纹或面容。");
         note.setTextSize(12.5f);
         note.setTextColor(Color.rgb(105, 120, 120));
         note.setLineSpacing(0, 1.12f);
         root.addView(note, fullWrap(0));
 
+        refreshSummary();
         setContentView(scrollView);
+    }
+
+    private TextView sectionTitle(String text) {
+        TextView title = new TextView(this);
+        title.setText(text);
+        title.setTextSize(17);
+        title.setTextColor(Color.rgb(20, 45, 45));
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        return title;
     }
 
     private Button optionButton(String title, String subtitle) {
@@ -102,6 +124,36 @@ public class SecuritySettingsActivity extends FragmentActivity {
         button.setBackground(roundedBox(Color.WHITE, Color.rgb(205, 218, 216), 14));
         button.setMinHeight(dp(72));
         return button;
+    }
+
+    private void chooseRelockTimeout() {
+        String[] labels = {"立即", "15秒", "1分钟", "5分钟", "仅完全退出后"};
+        long[] values = {
+                AppSecurity.RELOCK_IMMEDIATELY,
+                AppSecurity.RELOCK_AFTER_15_SECONDS,
+                AppSecurity.RELOCK_AFTER_1_MINUTE,
+                AppSecurity.RELOCK_AFTER_5_MINUTES,
+                AppSecurity.RELOCK_ON_COLD_START_ONLY
+        };
+        long current = AppSecurity.getRelockTimeoutMs(this);
+        int checked = 1;
+        for (int i = 0; i < values.length; i++) if (values[i] == current) checked = i;
+
+        new AlertDialog.Builder(this)
+                .setTitle("自动锁定时间")
+                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                    AppSecurity.setRelockTimeoutMs(this, values[which]);
+                    dialog.dismiss();
+                    policyChanged("自动锁定时间已设为" + labels[which]);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void toggleScreenOffLock() {
+        boolean next = !AppSecurity.isLockOnScreenOff(this);
+        AppSecurity.setLockOnScreenOff(this, next);
+        policyChanged(next ? "已启用熄屏后立即锁定" : "已关闭熄屏后立即锁定");
     }
 
     private void configureBiometric() {
@@ -123,6 +175,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
                         AppSecurity.setBiometric(SecuritySettingsActivity.this);
                         securityChanged("已启用指纹或面容验证");
                     }
+
                     @Override
                     public void onAuthenticationFailed() {
                         super.onAuthenticationFailed();
@@ -231,7 +284,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
         }
         new AlertDialog.Builder(this)
                 .setTitle("关闭安全验证")
-                .setMessage("关闭后，打开 EZ记账 将不再要求指纹、密码或图形验证。")
+                .setMessage("关闭后，打开 EZ记账 将不再要求指纹、密码或图形验证。自动锁定策略会保留，重新启用时继续使用。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("关闭", (dialog, which) -> {
                     AppSecurity.disable(this);
@@ -242,12 +295,29 @@ public class SecuritySettingsActivity extends FragmentActivity {
 
     private void securityChanged(String text) {
         setResult(Activity.RESULT_OK);
-        refreshCurrentMode();
+        refreshSummary();
         Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
     }
 
-    private void refreshCurrentMode() {
-        currentMode.setText("当前方式：" + AppSecurity.getModeLabel(this));
+    private void policyChanged(String text) {
+        setResult(Activity.RESULT_OK);
+        refreshSummary();
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
+    }
+
+    private void refreshSummary() {
+        currentMode.setText("当前方式：" + AppSecurity.getModeLabel(this) +
+                "\n自动锁定：" + AppSecurity.getRelockTimeoutLabel(this) +
+                "\n熄屏锁定：" + (AppSecurity.isLockOnScreenOff(this) ? "开启" : "关闭"));
+        if (relockButton != null) {
+            relockButton.setText("自动锁定时间：" + AppSecurity.getRelockTimeoutLabel(this) +
+                    "\n设置 App 切到后台后多长时间重新验证");
+        }
+        if (screenOffButton != null) {
+            screenOffButton.setText("熄屏后立即锁定：" +
+                    (AppSecurity.isLockOnScreenOff(this) ? "开启" : "关闭") +
+                    "\n手机变为非交互状态后，下次进入立即验证");
+        }
     }
 
     private GradientDrawable roundedBox(int fill, int stroke, int radiusDp) {
