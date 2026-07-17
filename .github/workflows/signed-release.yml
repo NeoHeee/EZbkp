@@ -61,72 +61,37 @@ jobs:
           gradle-version: '8.9'
 
       - name: Build signed release APK
-        id: release_build
         shell: bash
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          set +e
-          gradle --no-daemon :app:assembleRelease --stacktrace > build-release.log 2>&1
-          STATUS=$?
-          echo '===== Gradle release build tail ====='
-          tail -n 180 build-release.log
-          exit "$STATUS"
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: EZ记账-Signed-Build-Log
-          path: build-release.log
-          if-no-files-found: ignore
-          retention-days: 7
+        run: gradle --no-daemon :app:assembleRelease
 
       - name: Verify signature and prepare artifact
         shell: bash
         run: |
           mkdir -p dist
           APK='app/build/outputs/apk/release/app-release.apk'
-          OUTPUT='dist/EZ记账-v1.1.0-signed.apk'
+          OUTPUT='dist/EZ记账-v1.2.0-signed.apk'
           APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
-
           test -x "$APKSIGNER" || { echo "apksigner not found: $APKSIGNER"; exit 1; }
           cp "$APK" "$OUTPUT"
-
-          set +e
           CERT_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$OUTPUT" 2>&1)"
-          VERIFY_STATUS=$?
-          set -e
-
           printf '%s\n' "$CERT_OUTPUT" | tee dist/signing-certificate.txt
-
-          if [ "$VERIFY_STATUS" -ne 0 ]; then
-            echo "apksigner verification failed with status $VERIFY_STATUS"
-            exit "$VERIFY_STATUS"
-          fi
-
           ACTUAL_CERT_SHA256="$(printf '%s\n' "$CERT_OUTPUT" | awk -F': ' 'tolower($0) ~ /certificate sha-256 digest/ {print $2; exit}' | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
-
-          echo "Expected certificate SHA-256: $EXPECTED_CERT_SHA256"
-          echo "Actual certificate SHA-256:   $ACTUAL_CERT_SHA256"
-
           test -n "$ACTUAL_CERT_SHA256" || { echo 'Unable to parse signing certificate SHA-256 digest'; exit 1; }
-
           if [ "$ACTUAL_CERT_SHA256" != "$EXPECTED_CERT_SHA256" ]; then
             echo "Unexpected signing certificate: $ACTUAL_CERT_SHA256"
             exit 1
           fi
-
           printf '%s\n' "$ACTUAL_CERT_SHA256" > dist/signing-certificate.sha256
           sha256sum "$OUTPUT" > "$OUTPUT.sha256"
 
       - name: Upload signed APK
-        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: EZ记账-Signed-Release
+          name: EZ记账-Signed-Release-v1.2.0
           path: dist/*
           if-no-files-found: error
           retention-days: 90
