@@ -27,7 +27,10 @@ jobs:
       - name: Apply v1.4.0 integration
         shell: bash
         run: |
-          if [ -f scripts/apply_v140.py ]; then
+          if [ -f scripts/run_v140.py ]; then
+            python3 scripts/run_v140.py
+            echo 'INTEGRATION_APPLIED=true' >> "$GITHUB_ENV"
+          elif [ -f scripts/apply_v140.py ]; then
             python3 scripts/apply_v140.py
             echo 'INTEGRATION_APPLIED=true' >> "$GITHUB_ENV"
           fi
