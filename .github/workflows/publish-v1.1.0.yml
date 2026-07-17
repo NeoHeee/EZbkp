@@ -1,0 +1,140 @@
+name: Publish EZ记账 v1.1.0
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v1.1.0.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    env:
+      EXPECTED_CERT_SHA256: d29d3f581d1a90b12a067317c6f7295783727e1573e7c283e09ef398ca64b799
+      RELEASE_TAG: v1.1.0
+      RELEASE_TITLE: EZ记账 v1.1.0
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate signing secrets
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo 'Missing ANDROID_KEYSTORE_BASE64'; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo 'Missing ANDROID_KEYSTORE_PASSWORD'; exit 1; }
+          test -n "$ANDROID_KEY_ALIAS" || { echo 'Missing ANDROID_KEY_ALIAS'; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD" || { echo 'Missing ANDROID_KEY_PASSWORD'; exit 1; }
+
+      - name: Restore signing keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/ez-accounting-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build fixed-signature release APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon :app:assembleRelease
+
+      - name: Verify signature and prepare release assets
+        shell: bash
+        run: |
+          mkdir -p dist
+          APK='app/build/outputs/apk/release/app-release.apk'
+          OUTPUT='dist/EZ记账-v1.1.0.apk'
+          CERT_INFO='dist/EZ记账-v1.1.0-签名信息.txt'
+
+          cp "$APK" "$OUTPUT"
+          apksigner verify --verbose --print-certs "$OUTPUT" | tee "$CERT_INFO"
+
+          ACTUAL_CERT_SHA256="$(apksigner verify --print-certs "$OUTPUT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1 | tr '[:upper:]' '[:lower:]')"
+          if [ "$ACTUAL_CERT_SHA256" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "Unexpected signing certificate: $ACTUAL_CERT_SHA256"
+            exit 1
+          fi
+
+          sha256sum "$OUTPUT" > "$OUTPUT.sha256"
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## EZ记账 v1.1.0
+
+          面向自托管 ezBookkeeping 的轻量 Android 客户端。
+
+          ### 主要功能
+
+          - 去除额外顶部工具栏，全屏显示 ezBookkeeping 原始移动界面
+          - 首次启动可同时配置本地地址和公网地址
+          - 启动时优先检测本地线路，本地不可用时自动切换公网线路
+          - 页面首次加载失败时自动尝试备用线路
+          - 保持 Cookie 和登录状态
+          - 下拉刷新页面
+          - 双指长按打开隐藏功能菜单
+          - 支持图片、账单及附件上传
+          - 支持文件下载到 Android“下载”目录
+          - 不绕过无效 HTTPS 证书
+
+          ### 安装说明
+
+          本版本是首个固定签名正式版。此前安装测试签名版本的用户，需要先卸载旧版本，再安装本版本；从本版本开始，后续正式版本可以直接覆盖升级。
+
+          ### 校验
+
+          固定签名证书 SHA-256：
+
+          `d29d3f581d1a90b12a067317c6f7295783727e1573e7c283e09ef398ca64b799`
+          EOF
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+            gh release edit "$RELEASE_TAG" \
+              --title "$RELEASE_TITLE" \
+              --notes-file release-notes.md \
+              --latest
+          else
+            gh release create "$RELEASE_TAG" dist/* \
+              --target main \
+              --title "$RELEASE_TITLE" \
+              --notes-file release-notes.md \
+              --latest
+          fi
