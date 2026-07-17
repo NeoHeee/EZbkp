@@ -15,14 +15,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.Handler;
-import android.os.Looper;
 import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
-import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
@@ -44,6 +41,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.fragment.app.FragmentActivity;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.net.HttpURLConnection;
@@ -51,7 +49,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 
-public class MainActivity extends Activity {
+public class MainActivity extends FragmentActivity {
     private static final String PREFS = "ez_accounting_prefs";
     private static final String KEY_LOCAL_URL = "local_url";
     private static final String KEY_PUBLIC_URL = "public_url";
@@ -59,10 +57,14 @@ public class MainActivity extends Activity {
 
     private static final int FILE_CHOOSER_REQUEST = 1010;
     private static final int STORAGE_PERMISSION_REQUEST = 1011;
+    private static final int REQUEST_UNLOCK_APP = 2001;
+    private static final int REQUEST_VERIFY_SETTINGS = 2002;
+    private static final int REQUEST_SECURITY_SETTINGS = 2003;
 
     private static final int ROUTE_NONE = 0;
     private static final int ROUTE_LOCAL = 1;
     private static final int ROUTE_PUBLIC = 2;
+    private static final long BACKGROUND_RELOCK_MS = 15_000L;
 
     private SharedPreferences preferences;
     private WebView webView;
@@ -77,12 +79,17 @@ public class MainActivity extends Activity {
     private boolean fallbackAttempted;
     private int activeRoute = ROUTE_NONE;
 
-    private final Handler gestureHandler = new Handler(Looper.getMainLooper());
-    private Runnable quickMenuRunnable;
-    private boolean twoFingerGesturePending;
-    private boolean quickMenuTriggered;
-    private float gestureStartX;
-    private float gestureStartY;
+    private boolean appInitialized;
+    private boolean authFlowInProgress;
+    private long backgroundAt;
+
+    private boolean twoFingerTapCandidate;
+    private long twoFingerTapStartedAt;
+    private float twoFingerTapStartX;
+    private float twoFingerTapStartY;
+    private long firstTwoFingerTapAt;
+    private float firstTwoFingerTapX;
+    private float firstTwoFingerTapY;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -91,11 +98,27 @@ public class MainActivity extends Activity {
         localUrl = preferences.getString(KEY_LOCAL_URL, "");
         publicUrl = preferences.getString(KEY_PUBLIC_URL, "");
 
-        if (hasSavedRoutes()) {
-            launchPreferredRoute(true);
+        if (AppSecurity.isEnabled(this)) {
+            showLoadingScreen("请完成安全验证…");
+            requestAppUnlock();
         } else {
-            showServerSetup();
+            initializeApp();
         }
+    }
+
+    private void initializeApp() {
+        if (appInitialized) return;
+        appInitialized = true;
+        if (hasSavedRoutes()) launchPreferredRoute(true);
+        else showServerSetup();
+    }
+
+    private void requestAppUnlock() {
+        if (authFlowInProgress) return;
+        authFlowInProgress = true;
+        Intent intent = new Intent(this, LockActivity.class);
+        intent.putExtra(LockActivity.EXTRA_REASON, "请验证身份后进入应用");
+        startActivityForResult(intent, REQUEST_UNLOCK_APP);
     }
 
     private boolean hasSavedRoutes() {
@@ -113,11 +136,9 @@ public class MainActivity extends Activity {
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER_HORIZONTAL);
-        int horizontal = dp(28);
-        content.setPadding(horizontal, dp(42), horizontal, dp(28));
+        content.setPadding(dp(28), dp(42), dp(28), dp(28));
         scrollView.addView(content, new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView logo = new TextView(this);
         logo.setText("¥✓");
@@ -152,13 +173,11 @@ public class MainActivity extends Activity {
 
         TextView localLabel = createFieldLabel("本地地址（优先）");
         content.addView(localLabel, matchWrap(dp(8)));
-
         EditText localInput = createUrlInput("http://192.168.1.100:8080", localUrl);
         content.addView(localInput, matchWrap(dp(16)));
 
         TextView publicLabel = createFieldLabel("公网地址（备用）");
         content.addView(publicLabel, matchWrap(dp(8)));
-
         EditText publicInput = createUrlInput("https://money.example.com", publicUrl);
         content.addView(publicInput, matchWrap(dp(18)));
 
@@ -172,12 +191,11 @@ public class MainActivity extends Activity {
                 new int[]{Color.rgb(15, 118, 110), Color.rgb(13, 148, 136)});
         buttonBackground.setCornerRadius(dp(14));
         connectButton.setBackground(buttonBackground);
-        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(52));
-        content.addView(connectButton, buttonParams);
+        content.addView(connectButton, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
 
         TextView note = new TextView(this);
-        note.setText("进入记账界面后不会显示额外顶部栏。\n下拉页面可刷新；双指长按页面可打开隐藏功能菜单。\n公网访问建议使用有效 HTTPS 证书。应用不会忽略无效证书。\n地址仅保存在本机。 ");
+        note.setText("进入记账界面后不会显示额外顶部栏。\n下拉页面可刷新；双指快速双击可打开隐藏功能菜单。\n公网访问建议使用有效 HTTPS 证书，应用不会忽略无效证书。\n地址与安全设置仅保存在本机。");
         note.setTextSize(12.5f);
         note.setTextColor(Color.rgb(105, 120, 120));
         note.setGravity(Gravity.CENTER);
@@ -187,7 +205,6 @@ public class MainActivity extends Activity {
         connectButton.setOnClickListener(v -> {
             String normalizedLocal = normalizeServerUrl(localInput.getText().toString());
             String normalizedPublic = normalizeServerUrl(publicInput.getText().toString());
-
             if (isBlank(localInput.getText().toString()) && isBlank(publicInput.getText().toString())) {
                 localInput.setError("请至少填写一个地址");
                 return;
@@ -200,16 +217,12 @@ public class MainActivity extends Activity {
                 publicInput.setError("请输入有效的 HTTP 或 HTTPS 地址");
                 return;
             }
-
             localUrl = normalizedLocal == null ? "" : normalizedLocal;
             publicUrl = normalizedPublic == null ? "" : normalizedPublic;
-            preferences.edit()
-                    .putString(KEY_LOCAL_URL, localUrl)
-                    .putString(KEY_PUBLIC_URL, publicUrl)
-                    .apply();
+            preferences.edit().putString(KEY_LOCAL_URL, localUrl)
+                    .putString(KEY_PUBLIC_URL, publicUrl).apply();
             launchPreferredRoute(true);
         });
-
         setContentView(scrollView);
     }
 
@@ -230,11 +243,11 @@ public class MainActivity extends Activity {
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         input.setTextSize(16);
         input.setPadding(dp(16), dp(13), dp(16), dp(13));
-        GradientDrawable inputBackground = new GradientDrawable();
-        inputBackground.setColor(Color.WHITE);
-        inputBackground.setStroke(dp(1), Color.rgb(196, 210, 208));
-        inputBackground.setCornerRadius(dp(14));
-        input.setBackground(inputBackground);
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(Color.WHITE);
+        background.setStroke(dp(1), Color.rgb(196, 210, 208));
+        background.setCornerRadius(dp(14));
+        input.setBackground(background);
         return input;
     }
 
@@ -243,9 +256,9 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             RouteSelection selection = determinePreferredRoute();
             runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
                 if (selection.url == null) {
-                    Toast.makeText(MainActivity.this,
-                            "没有可用线路，请检查本地地址、公网地址或网络连接",
+                    Toast.makeText(this, "没有可用线路，请检查本地地址、公网地址或网络连接",
                             Toast.LENGTH_LONG).show();
                     showServerSetup();
                     return;
@@ -255,8 +268,8 @@ public class MainActivity extends Activity {
                 preferences.edit().putString(KEY_LAST_ROUTE, activeBaseUrl).apply();
                 showWebClient(activeBaseUrl);
                 if (!fromStartup) {
-                    Toast.makeText(MainActivity.this,
-                            selection.routeType == ROUTE_LOCAL ? "已切换到本地线路" : "已切换到公网线路",
+                    Toast.makeText(this,
+                            activeRoute == ROUTE_LOCAL ? "已切换到本地线路" : "已切换到公网线路",
                             Toast.LENGTH_SHORT).show();
                 }
             });
@@ -264,25 +277,20 @@ public class MainActivity extends Activity {
     }
 
     private RouteSelection determinePreferredRoute() {
-        if (!isBlank(localUrl) && isReachable(localUrl, 1400)) {
-            return new RouteSelection(localUrl, ROUTE_LOCAL);
-        }
-        if (!isBlank(publicUrl) && isReachable(publicUrl, 2400)) {
-            return new RouteSelection(publicUrl, ROUTE_PUBLIC);
-        }
+        if (!isBlank(localUrl) && isReachable(localUrl, 1400)) return new RouteSelection(localUrl, ROUTE_LOCAL);
+        if (!isBlank(publicUrl) && isReachable(publicUrl, 2400)) return new RouteSelection(publicUrl, ROUTE_PUBLIC);
         return new RouteSelection(null, ROUTE_NONE);
     }
 
     private boolean isReachable(String urlString, int timeoutMs) {
         HttpURLConnection connection = null;
         try {
-            URL url = new URL(urlString);
-            connection = (HttpURLConnection) url.openConnection();
+            connection = (HttpURLConnection) new URL(urlString).openConnection();
             connection.setConnectTimeout(timeoutMs);
             connection.setReadTimeout(timeoutMs);
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod("GET");
-            connection.setRequestProperty("User-Agent", "EZAccounting/1.1.0");
+            connection.setRequestProperty("User-Agent", "EZAccounting/1.2.0");
             connection.connect();
             int code = connection.getResponseCode();
             return (code >= 200 && code < 400) || code == 401 || code == 403;
@@ -295,37 +303,27 @@ public class MainActivity extends Activity {
 
     private void showLoadingScreen(String text) {
         showingWebView = false;
-
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.WHITE);
-
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
         box.setPadding(dp(24), dp(24), dp(24), dp(24));
-
-        android.widget.ProgressBar progress = new android.widget.ProgressBar(this);
-        box.addView(progress);
-
+        box.addView(new android.widget.ProgressBar(this));
         TextView message = new TextView(this);
         message.setText(text);
         message.setTextSize(15);
         message.setTextColor(Color.rgb(70, 86, 86));
         message.setPadding(0, dp(14), 0, 0);
         box.addView(message);
-
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER);
-        root.addView(box, params);
+        root.addView(box, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
         setContentView(root);
     }
 
     private LinearLayout.LayoutParams matchWrap(int bottomMargin) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         params.bottomMargin = bottomMargin;
         return params;
     }
@@ -334,20 +332,16 @@ public class MainActivity extends Activity {
         if (raw == null) return null;
         String value = raw.trim();
         if (value.isEmpty()) return null;
-
         if (!value.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*$")) {
             value = looksLikePrivateHost(value) ? "http://" + value : "https://" + value;
         }
-
         try {
             URI uri = new URI(value);
             String scheme = uri.getScheme();
             if (scheme == null || uri.getHost() == null) return null;
             if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) return null;
             String normalized = uri.toString();
-            while (normalized.endsWith("/")) {
-                normalized = normalized.substring(0, normalized.length() - 1);
-            }
+            while (normalized.endsWith("/")) normalized = normalized.substring(0, normalized.length() - 1);
             return normalized;
         } catch (URISyntaxException error) {
             return null;
@@ -356,9 +350,8 @@ public class MainActivity extends Activity {
 
     private boolean looksLikePrivateHost(String value) {
         String host = value.split("[/?:]", 2)[0].toLowerCase();
-        return host.equals("localhost") || host.endsWith(".local") ||
-                host.startsWith("10.") || host.startsWith("192.168.") ||
-                host.matches("172\\.(1[6-9]|2[0-9]|3[0-1])\\..*") ||
+        return host.equals("localhost") || host.endsWith(".local") || host.startsWith("10.") ||
+                host.startsWith("192.168.") || host.matches("172\\.(1[6-9]|2[0-9]|3[0-1])\\..*") ||
                 host.matches("[0-9a-f:]+") || !host.contains(".");
     }
 
@@ -366,23 +359,16 @@ public class MainActivity extends Activity {
         showingWebView = true;
         hasLoadedSuccessfully = false;
         fallbackAttempted = false;
-
         FrameLayout root = new FrameLayout(this);
         swipeRefreshLayout = new SwipeRefreshLayout(this);
         swipeRefreshLayout.setColorSchemeColors(Color.rgb(13, 148, 136));
-        swipeRefreshLayout.setOnRefreshListener(() -> {
-            if (webView != null) webView.reload();
-        });
-
+        swipeRefreshLayout.setOnRefreshListener(() -> { if (webView != null) webView.reload(); });
         webView = new WebView(this);
         swipeRefreshLayout.addView(webView, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         root.addView(swipeRefreshLayout, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
-
         configureWebView();
         setupHiddenGestureMenu();
         webView.loadUrl(url);
@@ -403,74 +389,52 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.1.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.2.0");
 
-        CookieManager cookieManager = CookieManager.getInstance();
-        cookieManager.setAcceptCookie(true);
-        cookieManager.setAcceptThirdPartyCookies(webView, true);
+        CookieManager.getInstance().setAcceptCookie(true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
         webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return handleNavigation(request.getUrl());
             }
-
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+            @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 return handleNavigation(Uri.parse(url));
             }
-
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
+            @Override public void onPageFinished(WebView view, String url) {
                 hasLoadedSuccessfully = true;
                 if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);
             }
-
-            @Override
-            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                super.onReceivedError(view, request, error);
+            @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
                     if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);
-                    if (!hasLoadedSuccessfully && tryFallbackRoute()) {
-                        return;
-                    }
-                    Toast.makeText(MainActivity.this,
-                            "页面加载失败，请检查线路地址和网络连接",
+                    if (!hasLoadedSuccessfully && tryFallbackRoute()) return;
+                    Toast.makeText(MainActivity.this, "页面加载失败，请检查线路地址和网络连接",
                             Toast.LENGTH_LONG).show();
                 }
             }
-
-            @Override
-            public void onReceivedSslError(WebView view, SslErrorHandler handler,
-                                           android.net.http.SslError error) {
+            @Override public void onReceivedSslError(WebView view, SslErrorHandler handler,
+                                                     android.net.http.SslError error) {
                 handler.cancel();
-                if (!hasLoadedSuccessfully && tryFallbackRoute()) {
-                    return;
-                }
-                Toast.makeText(MainActivity.this,
-                        "HTTPS 证书无效，已阻止继续连接",
+                if (!hasLoadedSuccessfully && tryFallbackRoute()) return;
+                Toast.makeText(MainActivity.this, "HTTPS 证书无效，已阻止继续连接",
                         Toast.LENGTH_LONG).show();
             }
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
-            public boolean onShowFileChooser(WebView webView,
-                                             ValueCallback<Uri[]> newCallback,
-                                             FileChooserParams fileChooserParams) {
+            public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> callback,
+                                             FileChooserParams params) {
                 if (filePathCallback != null) filePathCallback.onReceiveValue(null);
-                filePathCallback = newCallback;
-
+                filePathCallback = callback;
                 Intent intent;
-                try {
-                    intent = fileChooserParams.createIntent();
-                } catch (Exception ignored) {
+                try { intent = params.createIntent(); }
+                catch (Exception ignored) {
                     intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
                     intent.addCategory(Intent.CATEGORY_OPENABLE);
                     intent.setType("*/*");
                 }
-
                 try {
                     startActivityForResult(Intent.createChooser(intent, "选择账单、图片或附件"),
                             FILE_CHOOSER_REQUEST);
@@ -482,7 +446,6 @@ public class MainActivity extends Activity {
                 }
             }
         });
-
         webView.setDownloadListener(createDownloadListener());
     }
 
@@ -491,20 +454,17 @@ public class MainActivity extends Activity {
         String fallbackUrl = null;
         int fallbackRoute = ROUTE_NONE;
         if (activeRoute == ROUTE_LOCAL && !isBlank(publicUrl)) {
-            fallbackUrl = publicUrl;
-            fallbackRoute = ROUTE_PUBLIC;
+            fallbackUrl = publicUrl; fallbackRoute = ROUTE_PUBLIC;
         } else if (activeRoute == ROUTE_PUBLIC && !isBlank(localUrl)) {
-            fallbackUrl = localUrl;
-            fallbackRoute = ROUTE_LOCAL;
+            fallbackUrl = localUrl; fallbackRoute = ROUTE_LOCAL;
         }
         if (fallbackUrl == null) return false;
-
         fallbackAttempted = true;
         activeRoute = fallbackRoute;
         activeBaseUrl = fallbackUrl;
         if (webView != null) {
-            Toast.makeText(this,
-                    fallbackRoute == ROUTE_PUBLIC ? "本地线路不可用，正在切换到公网线路" : "公网线路不可用，正在切换到本地线路",
+            Toast.makeText(this, fallbackRoute == ROUTE_PUBLIC ?
+                            "本地线路不可用，正在切换到公网线路" : "公网线路不可用，正在切换到本地线路",
                     Toast.LENGTH_SHORT).show();
             webView.loadUrl(fallbackUrl);
             return true;
@@ -513,111 +473,100 @@ public class MainActivity extends Activity {
     }
 
     private void setupHiddenGestureMenu() {
-        quickMenuRunnable = () -> {
-            if (!twoFingerGesturePending || quickMenuTriggered) return;
-            quickMenuTriggered = true;
-            if (webView != null) {
-                webView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-            }
-            openQuickActions();
-        };
-
-        webView.setOnTouchListener((v, event) -> {
+        webView.setOnTouchListener((view, event) -> {
+            long now = System.currentTimeMillis();
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_POINTER_DOWN:
-                    if (event.getPointerCount() >= 2 && !twoFingerGesturePending) {
-                        twoFingerGesturePending = true;
-                        quickMenuTriggered = false;
-                        gestureStartX = averageX(event);
-                        gestureStartY = averageY(event);
-                        gestureHandler.postDelayed(quickMenuRunnable, 650);
+                    if (event.getPointerCount() == 2) {
+                        twoFingerTapCandidate = true;
+                        twoFingerTapStartedAt = now;
+                        twoFingerTapStartX = averageX(event);
+                        twoFingerTapStartY = averageY(event);
                     }
                     break;
                 case MotionEvent.ACTION_MOVE:
-                    if (twoFingerGesturePending) {
-                        if (event.getPointerCount() < 2 || movedTooMuch(event)) {
-                            cancelQuickMenuGesture();
-                        }
-                    }
+                    if (twoFingerTapCandidate && (event.getPointerCount() < 2 || movedTooMuch(event)))
+                        twoFingerTapCandidate = false;
                     break;
                 case MotionEvent.ACTION_POINTER_UP:
+                    if (twoFingerTapCandidate && event.getPointerCount() == 2 &&
+                            now - twoFingerTapStartedAt <= 300L)
+                        registerTwoFingerTap(now, averageX(event), averageY(event));
+                    twoFingerTapCandidate = false;
+                    break;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
-                    if (!quickMenuTriggered) cancelQuickMenuGesture();
-                    if (quickMenuTriggered && event.getActionMasked() == MotionEvent.ACTION_UP) {
-                        quickMenuTriggered = false;
-                        return true;
-                    }
+                    twoFingerTapCandidate = false;
                     break;
             }
             return false;
         });
     }
 
-    private void cancelQuickMenuGesture() {
-        twoFingerGesturePending = false;
-        gestureHandler.removeCallbacks(quickMenuRunnable);
+    private void registerTwoFingerTap(long now, float x, float y) {
+        boolean secondTap = firstTwoFingerTapAt > 0 && now - firstTwoFingerTapAt <= 550L &&
+                distance(x, y, firstTwoFingerTapX, firstTwoFingerTapY) <= dp(90);
+        if (secondTap) {
+            firstTwoFingerTapAt = 0;
+            if (webView != null) {
+                webView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                webView.post(this::openQuickActions);
+            }
+        } else {
+            firstTwoFingerTapAt = now;
+            firstTwoFingerTapX = x;
+            firstTwoFingerTapY = y;
+        }
     }
 
     private boolean movedTooMuch(MotionEvent event) {
-        float dx = Math.abs(averageX(event) - gestureStartX);
-        float dy = Math.abs(averageY(event) - gestureStartY);
-        return dx > dp(24) || dy > dp(24);
+        return Math.abs(averageX(event) - twoFingerTapStartX) > dp(28) ||
+                Math.abs(averageY(event) - twoFingerTapStartY) > dp(28);
     }
 
     private float averageX(MotionEvent event) {
         int count = Math.min(2, event.getPointerCount());
-        float total = 0f;
+        float total = 0;
         for (int i = 0; i < count; i++) total += event.getX(i);
-        return total / count;
+        return count == 0 ? 0 : total / count;
     }
 
     private float averageY(MotionEvent event) {
         int count = Math.min(2, event.getPointerCount());
-        float total = 0f;
+        float total = 0;
         for (int i = 0; i < count; i++) total += event.getY(i);
-        return total / count;
+        return count == 0 ? 0 : total / count;
+    }
+
+    private float distance(float x1, float y1, float x2, float y2) {
+        float dx = x1 - x2, dy = y1 - y2;
+        return (float) Math.sqrt(dx * dx + dy * dy);
     }
 
     private void openQuickActions() {
-        cancelQuickMenuGesture();
-        CharSequence[] items = new CharSequence[]{
-                "返回首页",
-                "重新检测线路",
-                "在浏览器中打开",
-                "更换线路地址",
-                "清除登录与缓存",
-                "WebView 信息"
+        CharSequence[] items = {
+                "返回首页", "重新检测线路", "在浏览器中打开", "更换线路地址",
+                "进入 App 的安全验证", "清除登录与缓存", "WebView 信息"
         };
         new AlertDialog.Builder(this)
                 .setTitle(activeRoute == ROUTE_LOCAL ? "隐藏功能菜单（当前：本地线路）" :
                         activeRoute == ROUTE_PUBLIC ? "隐藏功能菜单（当前：公网线路）" : "隐藏功能菜单")
                 .setItems(items, (dialog, which) -> {
                     switch (which) {
-                        case 0:
-                            if (webView != null) webView.loadUrl(activeBaseUrl);
-                            break;
-                        case 1:
-                            launchPreferredRoute(false);
-                            break;
+                        case 0: if (webView != null) webView.loadUrl(activeBaseUrl); break;
+                        case 1: launchPreferredRoute(false); break;
                         case 2:
-                            if (webView != null) {
-                                openExternal(Uri.parse(webView.getUrl() == null ? activeBaseUrl : webView.getUrl()));
-                            }
+                            if (webView != null) openExternal(Uri.parse(
+                                    webView.getUrl() == null ? activeBaseUrl : webView.getUrl()));
                             break;
-                        case 3:
-                            confirmChangeServer();
-                            break;
-                        case 4:
-                            confirmClearSiteData();
-                            break;
-                        case 5:
-                            try {
-                                startActivity(new Intent(Settings.ACTION_WEBVIEW_SETTINGS));
-                            } catch (Exception ignored) {
+                        case 3: confirmChangeServer(); break;
+                        case 4: requestSecuritySettings(); break;
+                        case 5: confirmClearSiteData(); break;
+                        case 6:
+                            try { startActivity(new Intent(Settings.ACTION_WEBVIEW_SETTINGS)); }
+                            catch (Exception ignored) {
                                 Toast.makeText(this, WebView.getCurrentWebViewPackage() == null ?
-                                                "无法读取 WebView 信息" :
-                                                WebView.getCurrentWebViewPackage().packageName,
+                                                "无法读取 WebView 信息" : WebView.getCurrentWebViewPackage().packageName,
                                         Toast.LENGTH_LONG).show();
                             }
                             break;
@@ -627,25 +576,33 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private void requestSecuritySettings() {
+        if (!AppSecurity.isEnabled(this)) { openSecuritySettings(); return; }
+        authFlowInProgress = true;
+        Intent intent = new Intent(this, LockActivity.class);
+        intent.putExtra(LockActivity.EXTRA_REASON, "请先验证当前安全方式");
+        startActivityForResult(intent, REQUEST_VERIFY_SETTINGS);
+    }
+
+    private void openSecuritySettings() {
+        authFlowInProgress = true;
+        startActivityForResult(new Intent(this, SecuritySettingsActivity.class), REQUEST_SECURITY_SETTINGS);
+    }
+
     private boolean handleNavigation(Uri uri) {
         String scheme = uri.getScheme();
         if (scheme == null) return false;
         if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
             Uri base = Uri.parse(activeBaseUrl);
-            if (base.getHost() != null && base.getHost().equalsIgnoreCase(uri.getHost())) {
-                return false;
-            }
-            openExternal(uri);
-            return true;
+            if (base.getHost() != null && base.getHost().equalsIgnoreCase(uri.getHost())) return false;
         }
         openExternal(uri);
         return true;
     }
 
     private void openExternal(Uri uri) {
-        try {
-            startActivity(new Intent(Intent.ACTION_VIEW, uri));
-        } catch (ActivityNotFoundException error) {
+        try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); }
+        catch (ActivityNotFoundException error) {
             Toast.makeText(this, "无法打开该链接", Toast.LENGTH_SHORT).show();
         }
     }
@@ -653,14 +610,11 @@ public class MainActivity extends Activity {
     private DownloadListener createDownloadListener() {
         return (url, userAgent, contentDisposition, mimeType, contentLength) -> {
             if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
-                    checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
-                            PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
-                        STORAGE_PERMISSION_REQUEST);
+                    checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, STORAGE_PERMISSION_REQUEST);
                 Toast.makeText(this, "授权后请再次点击下载", Toast.LENGTH_SHORT).show();
                 return;
             }
-
             try {
                 String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
                 DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
@@ -670,11 +624,9 @@ public class MainActivity extends Activity {
                 if (cookies != null) request.addRequestHeader("Cookie", cookies);
                 request.setTitle(fileName);
                 request.setDescription("EZ记账正在下载");
-                request.setNotificationVisibility(
-                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
                 request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
-                DownloadManager manager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-                manager.enqueue(request);
+                ((DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE)).enqueue(request);
                 Toast.makeText(this, "已开始下载：" + fileName, Toast.LENGTH_SHORT).show();
             } catch (Exception error) {
                 Toast.makeText(this, "下载失败，可尝试用浏览器打开", Toast.LENGTH_LONG).show();
@@ -686,9 +638,25 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == FILE_CHOOSER_REQUEST && filePathCallback != null) {
-            Uri[] results = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
-            filePathCallback.onReceiveValue(results);
+            filePathCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
             filePathCallback = null;
+            return;
+        }
+        if (requestCode == REQUEST_UNLOCK_APP) {
+            authFlowInProgress = false;
+            backgroundAt = 0;
+            if (resultCode == Activity.RESULT_OK) initializeApp();
+            else finishAndRemoveTask();
+            return;
+        }
+        if (requestCode == REQUEST_VERIFY_SETTINGS) {
+            if (resultCode == Activity.RESULT_OK) openSecuritySettings();
+            else { authFlowInProgress = false; backgroundAt = 0; }
+            return;
+        }
+        if (requestCode == REQUEST_SECURITY_SETTINGS) {
+            authFlowInProgress = false;
+            backgroundAt = 0;
         }
     }
 
@@ -704,7 +672,7 @@ public class MainActivity extends Activity {
     private void confirmClearSiteData() {
         new AlertDialog.Builder(this)
                 .setTitle("清除登录与缓存")
-                .setMessage("这会退出当前账号并清除网页缓存，但不会删除本地/公网地址配置。")
+                .setMessage("这会退出当前账号并清除网页缓存，但不会删除线路和安全验证配置。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("清除", (dialog, which) -> {
                     CookieManager.getInstance().removeAllCookies(null);
@@ -716,17 +684,30 @@ public class MainActivity extends Activity {
                         webView.loadUrl(activeBaseUrl);
                     }
                     Toast.makeText(this, "已清除登录与缓存", Toast.LENGTH_SHORT).show();
-                })
-                .show();
+                }).show();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (!appInitialized || authFlowInProgress || !AppSecurity.isEnabled(this)) return;
+        if (backgroundAt > 0 && System.currentTimeMillis() - backgroundAt >= BACKGROUND_RELOCK_MS) {
+            backgroundAt = 0;
+            showLoadingScreen("请重新验证身份…");
+            requestAppUnlock();
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (!isChangingConfigurations() && !authFlowInProgress && appInitialized)
+            backgroundAt = System.currentTimeMillis();
     }
 
     @Override
     public void onBackPressed() {
-        if (showingWebView && webView != null && webView.canGoBack()) {
-            webView.goBack();
-            return;
-        }
-
+        if (showingWebView && webView != null && webView.canGoBack()) { webView.goBack(); return; }
         long now = System.currentTimeMillis();
         if (showingWebView && now - lastBackPressedAt > 1800) {
             lastBackPressedAt = now;
@@ -738,7 +719,6 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        cancelQuickMenuGesture();
         destroyWebViewIfNeeded();
         super.onDestroy();
     }
@@ -752,21 +732,12 @@ public class MainActivity extends Activity {
         swipeRefreshLayout = null;
     }
 
-    private boolean isBlank(String value) {
-        return value == null || value.trim().isEmpty();
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
+    private boolean isBlank(String value) { return value == null || value.trim().isEmpty(); }
+    private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
     private static class RouteSelection {
         final String url;
         final int routeType;
-
-        RouteSelection(String url, int routeType) {
-            this.url = url;
-            this.routeType = routeType;
-        }
+        RouteSelection(String url, int routeType) { this.url = url; this.routeType = routeType; }
     }
 }
