@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ez_primary">#0F766E</color>
+    <color name="ez_primary_dark">#0A5D58</color>
+    <color name="ez_accent">#14B8A6</color>
+    <color name="ez_background">#F5F8F8</color>
+</resources>
