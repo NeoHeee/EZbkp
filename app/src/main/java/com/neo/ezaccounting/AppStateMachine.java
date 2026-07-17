@@ -24,13 +24,9 @@ public final class AppStateMachine {
         state = initialState == null ? State.INITIALIZING : initialState;
     }
 
-    public State getState() {
-        return state;
-    }
+    public State getState() { return state; }
 
-    public void setListener(Listener listener) {
-        this.listener = listener;
-    }
+    public void setListener(Listener listener) { this.listener = listener; }
 
     public boolean transitionTo(State next) {
         if (next == null || next == state) return false;
@@ -43,9 +39,7 @@ public final class AppStateMachine {
         return true;
     }
 
-    public String save() {
-        return state.name();
-    }
+    public String save() { return state.name(); }
 
     public static State restore(String value, State fallback) {
         if (value == null || value.trim().isEmpty()) return fallback;
@@ -60,7 +54,8 @@ public final class AppStateMachine {
         if (from == null || to == null) return false;
         switch (from) {
             case LOCKED:
-                return EnumSet.of(State.INITIALIZING, State.READY, State.SETTINGS, State.ERROR)
+                return EnumSet.of(State.INITIALIZING, State.CHECKING_ROUTE, State.LOADING_WEB,
+                                State.READY, State.SETTINGS, State.ERROR)
                         .contains(to);
             case INITIALIZING:
                 return EnumSet.of(State.CHECKING_ROUTE, State.SETTINGS, State.ERROR, State.LOCKED)
