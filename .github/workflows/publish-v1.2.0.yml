@@ -1,7 +1,7 @@
 name: Publish EZ记账 v1.2.0
 
 on:
-  push:
+  pull_request:
     branches: [main]
     paths:
       - '.github/workflows/publish-v1.2.0.yml'
@@ -20,8 +20,10 @@ jobs:
       RELEASE_TITLE: EZ记账 v1.2.0
 
     steps:
-      - name: Checkout
+      - name: Checkout main source
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Validate signing secrets
         shell: bash
@@ -85,7 +87,6 @@ jobs:
           OUTPUT='dist/EZ记账-v1.2.0.apk'
           CERT_INFO='dist/EZ记账-v1.2.0-签名信息.txt'
           APKSIGNER="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
-
           test -f "$APK"
           test -x "$APKSIGNER"
           cp "$APK" "$OUTPUT"
