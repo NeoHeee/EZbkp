@@ -39,7 +39,7 @@ jobs:
               else finishAndRemoveTask();
               return;
           }
-          '''
+          '''.replace('              ', '            ')
           new_result = '''        if (requestCode == REQUEST_UNLOCK_APP) {
               authFlowInProgress = false;
               backgroundAt = 0;
@@ -52,7 +52,7 @@ jobs:
               }
               return;
           }
-          '''
+          '''.replace('              ', '            ')
           if old_result not in text:
               raise SystemExit('REQUEST_UNLOCK_APP block not found')
           text = text.replace(old_result, new_result, 1)
@@ -62,14 +62,14 @@ jobs:
               showLoadingScreen("请重新验证身份…");
               requestAppUnlock();
           }
-          '''
+          '''.replace('              ', '            ')
           new_resume = '''        if (backgroundAt > 0 && System.currentTimeMillis() - backgroundAt >= BACKGROUND_RELOCK_MS) {
               backgroundAt = 0;
               // Keep the current WebView/configuration screen mounted. LockActivity covers it
               // temporarily and successful authentication simply reveals it again.
               requestAppUnlock();
           }
-          '''
+          '''.replace('              ', '            ')
           if old_resume not in text:
               raise SystemExit('onResume re-lock block not found')
           text = text.replace(old_resume, new_resume, 1)
