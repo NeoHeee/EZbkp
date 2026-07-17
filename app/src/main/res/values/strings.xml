@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">EZ记账</string>
+    <string name="shortcut_routes_short">线路设置</string>
+    <string name="shortcut_routes_long">配置本地和公网线路</string>
+    <string name="shortcut_security_short">安全设置</string>
+    <string name="shortcut_security_long">配置进入 App 的安全验证</string>
+    <string name="shortcut_lock_short">立即锁定</string>
+    <string name="shortcut_lock_long">立即进入身份验证</string>
+    <string name="shortcut_update_short">检查更新</string>
+    <string name="shortcut_update_long">检查 EZ记账 新版本</string>
 </resources>
