@@ -44,10 +44,10 @@ android {
                 storePassword releaseKeystorePassword
                 keyAlias releaseKeyAlias
                 keyPassword releaseKeyPassword
-                v1SigningEnabled true
-                v2SigningEnabled true
-                v3SigningEnabled true
-                v4SigningEnabled true
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
+                enableV4Signing true
             }
         }
     }
