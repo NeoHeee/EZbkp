@@ -25,7 +25,6 @@ public final class AppStateMachine {
     }
 
     public State getState() { return state; }
-
     public void setListener(Listener listener) { this.listener = listener; }
 
     public boolean transitionTo(State next) {
@@ -77,8 +76,8 @@ public final class AppStateMachine {
                                 State.LOCKED, State.READY)
                         .contains(to);
             case SETTINGS:
-                return EnumSet.of(State.CHECKING_ROUTE, State.READY, State.ERROR, State.LOCKED,
-                                State.INITIALIZING)
+                return EnumSet.of(State.CHECKING_ROUTE, State.LOADING_WEB, State.READY,
+                                State.ERROR, State.LOCKED, State.INITIALIZING)
                         .contains(to);
             default:
                 return false;
