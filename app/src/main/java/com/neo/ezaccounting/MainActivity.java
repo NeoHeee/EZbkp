@@ -5,8 +5,10 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.ActivityNotFoundException;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -64,7 +66,6 @@ public class MainActivity extends FragmentActivity {
     private static final int ROUTE_NONE = 0;
     private static final int ROUTE_LOCAL = 1;
     private static final int ROUTE_PUBLIC = 2;
-    private static final long BACKGROUND_RELOCK_MS = 15_000L;
 
     private SharedPreferences preferences;
     private WebView webView;
@@ -82,6 +83,20 @@ public class MainActivity extends FragmentActivity {
     private boolean appInitialized;
     private boolean authFlowInProgress;
     private long backgroundAt;
+    private boolean forceRelock;
+    private boolean screenReceiverRegistered;
+
+    private final BroadcastReceiver screenOffReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction()) &&
+                    appInitialized && !authFlowInProgress && AppSecurity.isEnabled(MainActivity.this) &&
+                    AppSecurity.isLockOnScreenOff(MainActivity.this)) {
+                forceRelock = true;
+                backgroundAt = System.currentTimeMillis();
+            }
+        }
+    };
 
     private boolean twoFingerTapCandidate;
     private long twoFingerTapStartedAt;
@@ -97,6 +112,7 @@ public class MainActivity extends FragmentActivity {
         preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
         localUrl = preferences.getString(KEY_LOCAL_URL, "");
         publicUrl = preferences.getString(KEY_PUBLIC_URL, "");
+        registerScreenOffReceiver();
 
         if (AppSecurity.isEnabled(this)) {
             showLoadingScreen("请完成安全验证…");
@@ -290,7 +306,7 @@ public class MainActivity extends FragmentActivity {
             connection.setReadTimeout(timeoutMs);
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod("GET");
-            connection.setRequestProperty("User-Agent", "EZAccounting/1.2.1");
+            connection.setRequestProperty("User-Agent", "EZAccounting/1.3.0");
             connection.connect();
             int code = connection.getResponseCode();
             return (code >= 200 && code < 400) || code == 401 || code == 403;
@@ -380,16 +396,22 @@ public class MainActivity extends FragmentActivity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
-        settings.setAllowFileAccess(true);
+        settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(true);
+        settings.setAllowFileAccessFromFileURLs(false);
+        settings.setAllowUniversalAccessFromFileURLs(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        boolean secureOrigin = activeBaseUrl != null &&
+                "https".equalsIgnoreCase(Uri.parse(activeBaseUrl).getScheme());
+        settings.setMixedContentMode(secureOrigin ?
+                WebSettings.MIXED_CONTENT_NEVER_ALLOW :
+                WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.2.1");
+        settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.3.0");
 
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
@@ -546,7 +568,7 @@ public class MainActivity extends FragmentActivity {
     private void openQuickActions() {
         CharSequence[] items = {
                 "返回首页", "重新检测线路", "在浏览器中打开", "更换线路地址",
-                "进入 App 的安全验证", "清除登录与缓存", "WebView 信息"
+                "立即锁定", "进入 App 的安全验证", "清除登录与缓存", "WebView 信息"
         };
         new AlertDialog.Builder(this)
                 .setTitle(activeRoute == ROUTE_LOCAL ? "隐藏功能菜单（当前：本地线路）" :
@@ -560,9 +582,10 @@ public class MainActivity extends FragmentActivity {
                                     webView.getUrl() == null ? activeBaseUrl : webView.getUrl()));
                             break;
                         case 3: confirmChangeServer(); break;
-                        case 4: requestSecuritySettings(); break;
-                        case 5: confirmClearSiteData(); break;
-                        case 6:
+                        case 4: lockImmediately(); break;
+                        case 5: requestSecuritySettings(); break;
+                        case 6: confirmClearSiteData(); break;
+                        case 7:
                             try { startActivity(new Intent(Settings.ACTION_WEBVIEW_SETTINGS)); }
                             catch (Exception ignored) {
                                 Toast.makeText(this, WebView.getCurrentWebViewPackage() == null ?
@@ -574,6 +597,16 @@ public class MainActivity extends FragmentActivity {
                 })
                 .setNegativeButton("关闭", null)
                 .show();
+    }
+
+    private void lockImmediately() {
+        if (!AppSecurity.isEnabled(this)) {
+            Toast.makeText(this, "请先启用进入 App 的安全验证", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        forceRelock = false;
+        backgroundAt = 0;
+        requestAppUnlock();
     }
 
     private void requestSecuritySettings() {
@@ -590,14 +623,45 @@ public class MainActivity extends FragmentActivity {
     }
 
     private boolean handleNavigation(Uri uri) {
+        if (uri == null) return true;
         String scheme = uri.getScheme();
-        if (scheme == null) return false;
+        if (scheme == null) return true;
+
         if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
-            Uri base = Uri.parse(activeBaseUrl);
-            if (base.getHost() != null && base.getHost().equalsIgnoreCase(uri.getHost())) return false;
+            if (WebOriginPolicy.isSameOrigin(activeBaseUrl, uri.toString())) return false;
+            openExternal(uri);
+            return true;
         }
-        openExternal(uri);
+        if (WebOriginPolicy.isAllowedExternalScheme(scheme)) {
+            openExternal(uri);
+            return true;
+        }
+        if ("intent".equalsIgnoreCase(scheme)) {
+            openIntentUri(uri.toString());
+            return true;
+        }
+        if ("about".equalsIgnoreCase(scheme) && "about:blank".equalsIgnoreCase(uri.toString())) {
+            return false;
+        }
+        Toast.makeText(this, "已阻止不受支持的链接类型", Toast.LENGTH_SHORT).show();
         return true;
+    }
+
+    private void openIntentUri(String uriString) {
+        try {
+            Intent intent = Intent.parseUri(uriString, Intent.URI_INTENT_SCHEME);
+            if (intent.resolveActivity(getPackageManager()) != null) {
+                startActivity(intent);
+                return;
+            }
+            String fallback = intent.getStringExtra("browser_fallback_url");
+            if (fallback != null && (fallback.startsWith("https://") || fallback.startsWith("http://"))) {
+                openExternal(Uri.parse(fallback));
+                return;
+            }
+        } catch (Exception ignored) {
+        }
+        Toast.makeText(this, "无法安全地打开该链接", Toast.LENGTH_SHORT).show();
     }
 
     private void openExternal(Uri uri) {
@@ -646,6 +710,7 @@ public class MainActivity extends FragmentActivity {
             authFlowInProgress = false;
             backgroundAt = 0;
             if (resultCode == Activity.RESULT_OK) {
+                forceRelock = false;
                 if (!appInitialized) initializeApp();
             } else {
                 finishAndRemoveTask();
@@ -690,13 +755,34 @@ public class MainActivity extends FragmentActivity {
                 }).show();
     }
 
+    private void registerScreenOffReceiver() {
+        if (screenReceiverRegistered) return;
+        IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(screenOffReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(screenOffReceiver, filter);
+        }
+        screenReceiverRegistered = true;
+    }
+
+    private void unregisterScreenOffReceiver() {
+        if (!screenReceiverRegistered) return;
+        try {
+            unregisterReceiver(screenOffReceiver);
+        } catch (Exception ignored) {
+        }
+        screenReceiverRegistered = false;
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
         if (!appInitialized || authFlowInProgress || !AppSecurity.isEnabled(this)) return;
-        if (backgroundAt > 0 && System.currentTimeMillis() - backgroundAt >= BACKGROUND_RELOCK_MS) {
+        if (LockPolicy.shouldRelock(backgroundAt, System.currentTimeMillis(),
+                AppSecurity.getRelockTimeoutMs(this), forceRelock)) {
             backgroundAt = 0;
-            // Keep the existing page mounted under LockActivity.
+            forceRelock = false;
             requestAppUnlock();
         }
     }
@@ -722,6 +808,7 @@ public class MainActivity extends FragmentActivity {
 
     @Override
     protected void onDestroy() {
+        unregisterScreenOffReceiver();
         destroyWebViewIfNeeded();
         super.onDestroy();
     }
