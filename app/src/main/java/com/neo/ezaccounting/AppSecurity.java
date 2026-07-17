@@ -16,10 +16,20 @@ public final class AppSecurity {
     public static final String MODE_PIN = "pin";
     public static final String MODE_PATTERN = "pattern";
 
+    public static final long RELOCK_IMMEDIATELY = 0L;
+    public static final long RELOCK_AFTER_15_SECONDS = 15_000L;
+    public static final long RELOCK_AFTER_1_MINUTE = 60_000L;
+    public static final long RELOCK_AFTER_5_MINUTES = 300_000L;
+    public static final long RELOCK_ON_COLD_START_ONLY = LockPolicy.COLD_START_ONLY;
+
     private static final String PREFS = "ez_app_security";
     private static final String KEY_MODE = "mode";
     private static final String KEY_SALT = "secret_salt";
     private static final String KEY_HASH = "secret_hash";
+    private static final String KEY_RELOCK_TIMEOUT = "relock_timeout_ms";
+    private static final String KEY_LOCK_ON_SCREEN_OFF = "lock_on_screen_off";
+    private static final String KEY_FAILED_ATTEMPTS = "failed_attempts";
+    private static final String KEY_BLOCKED_UNTIL = "blocked_until";
     private static final int ITERATIONS = 120_000;
     private static final int KEY_LENGTH_BITS = 256;
 
@@ -46,9 +56,42 @@ public final class AppSecurity {
         }
     }
 
+    public static long getRelockTimeoutMs(Context context) {
+        return prefs(context).getLong(KEY_RELOCK_TIMEOUT, RELOCK_AFTER_15_SECONDS);
+    }
+
+    public static void setRelockTimeoutMs(Context context, long timeoutMs) {
+        if (timeoutMs != RELOCK_IMMEDIATELY &&
+                timeoutMs != RELOCK_AFTER_15_SECONDS &&
+                timeoutMs != RELOCK_AFTER_1_MINUTE &&
+                timeoutMs != RELOCK_AFTER_5_MINUTES &&
+                timeoutMs != RELOCK_ON_COLD_START_ONLY) {
+            throw new IllegalArgumentException("Unsupported relock timeout");
+        }
+        prefs(context).edit().putLong(KEY_RELOCK_TIMEOUT, timeoutMs).apply();
+    }
+
+    public static String getRelockTimeoutLabel(Context context) {
+        long timeout = getRelockTimeoutMs(context);
+        if (timeout == RELOCK_IMMEDIATELY) return "立即";
+        if (timeout == RELOCK_AFTER_1_MINUTE) return "1分钟";
+        if (timeout == RELOCK_AFTER_5_MINUTES) return "5分钟";
+        if (timeout == RELOCK_ON_COLD_START_ONLY) return "仅完全退出后";
+        return "15秒";
+    }
+
+    public static boolean isLockOnScreenOff(Context context) {
+        return prefs(context).getBoolean(KEY_LOCK_ON_SCREEN_OFF, true);
+    }
+
+    public static void setLockOnScreenOff(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_LOCK_ON_SCREEN_OFF, enabled).apply();
+    }
+
     public static void setBiometric(Context context) {
         prefs(context).edit().putString(KEY_MODE, MODE_BIOMETRIC)
                 .remove(KEY_SALT).remove(KEY_HASH).apply();
+        resetFailedAttempts(context);
     }
 
     public static void setPin(Context context, String pin) {
@@ -60,7 +103,13 @@ public final class AppSecurity {
     }
 
     public static void disable(Context context) {
-        prefs(context).edit().clear().apply();
+        prefs(context).edit()
+                .remove(KEY_MODE)
+                .remove(KEY_SALT)
+                .remove(KEY_HASH)
+                .remove(KEY_FAILED_ATTEMPTS)
+                .remove(KEY_BLOCKED_UNTIL)
+                .apply();
     }
 
     public static boolean verifySecret(Context context, String candidate) {
@@ -77,6 +126,30 @@ public final class AppSecurity {
         }
     }
 
+    public static long recordFailedAttempt(Context context) {
+        SharedPreferences preferences = prefs(context);
+        int attempts = preferences.getInt(KEY_FAILED_ATTEMPTS, 0) + 1;
+        long delay = LockPolicy.lockoutDelayForFailedAttempts(attempts);
+        long blockedUntil = delay > 0 ? System.currentTimeMillis() + delay : 0L;
+        preferences.edit()
+                .putInt(KEY_FAILED_ATTEMPTS, attempts)
+                .putLong(KEY_BLOCKED_UNTIL, blockedUntil)
+                .apply();
+        return delay;
+    }
+
+    public static long getRemainingLockoutMs(Context context) {
+        long remaining = prefs(context).getLong(KEY_BLOCKED_UNTIL, 0L) - System.currentTimeMillis();
+        return Math.max(0L, remaining);
+    }
+
+    public static void resetFailedAttempts(Context context) {
+        prefs(context).edit()
+                .remove(KEY_FAILED_ATTEMPTS)
+                .remove(KEY_BLOCKED_UNTIL)
+                .apply();
+    }
+
     private static void saveSecret(Context context, String mode, String secret) {
         if (secret == null || secret.isEmpty()) throw new IllegalArgumentException("Secret cannot be empty");
         try {
@@ -87,6 +160,8 @@ public final class AppSecurity {
                     .putString(KEY_MODE, mode)
                     .putString(KEY_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
                     .putString(KEY_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
+                    .remove(KEY_FAILED_ATTEMPTS)
+                    .remove(KEY_BLOCKED_UNTIL)
                     .apply();
         } catch (Exception error) {
             throw new IllegalStateException("Unable to save app lock", error);
