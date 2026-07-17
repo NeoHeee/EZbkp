@@ -1,1 +1,142 @@
-test
+name: Publish EZ记账 v1.2.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v1.2.0.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    env:
+      EXPECTED_CERT_SHA256: d29d3f581d1a90b12a067317c6f7295783727e1573e7c283e09ef398ca64b799
+      RELEASE_TAG: v1.2.0
+      RELEASE_TITLE: EZ记账 v1.2.0
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate signing secrets
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo 'Missing ANDROID_KEYSTORE_BASE64'; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo 'Missing ANDROID_KEYSTORE_PASSWORD'; exit 1; }
+          test -n "$ANDROID_KEY_ALIAS" || { echo 'Missing ANDROID_KEY_ALIAS'; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD" || { echo 'Missing ANDROID_KEY_PASSWORD'; exit 1; }
+
+      - name: Restore and verify fixed keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/ez-accounting-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+          ACTUAL_CERT_SHA256="$(keytool -exportcert -alias "$ANDROID_KEY_ALIAS" -keystore "$KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -rfc | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          echo "Expected certificate SHA-256: $EXPECTED_CERT_SHA256"
+          echo "Actual certificate SHA-256:   $ACTUAL_CERT_SHA256"
+          test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build fixed-signature release APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon :app:assembleRelease
+
+      - name: Verify APK and prepare release assets
+        shell: bash
+        run: |
+          mkdir -p dist
+          APK='app/build/outputs/apk/release/app-release.apk'
+          OUTPUT='dist/EZ记账-v1.2.0.apk'
+          CERT_INFO='dist/EZ记账-v1.2.0-签名信息.txt'
+          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
+
+          test -f "$APK"
+          test -x "$APKSIGNER"
+          cp "$APK" "$OUTPUT"
+          "$APKSIGNER" verify --verbose --print-certs "$OUTPUT" | tee "$CERT_INFO"
+          sha256sum "$OUTPUT" > "$OUTPUT.sha256"
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## EZ记账 v1.2.0
+
+          本版本新增进入 App 的安全验证能力。
+
+          ### 新增功能
+
+          - 支持 Android 系统指纹或面容验证
+          - 支持四位数字密码
+          - 支持九宫格图形锁，至少连接四个点
+          - 冷启动时进行安全验证
+          - App 在后台停留 15 秒后，返回时重新验证
+          - 修改或关闭安全方式前，先验证当前安全方式
+          - PIN 和图形锁仅保存加盐哈希，不保存明文
+          - 双指长按改为双指快速双击打开隐藏菜单
+          - 隐藏菜单新增“进入 App 的安全验证”入口
+
+          ### 保留功能
+
+          - 全屏显示 ezBookkeeping 原始移动界面
+          - 本地地址和公网地址双线路自动选择
+          - 本地线路不可用时自动切换公网线路
+          - 保留登录状态、下拉刷新、上传和下载
+          - 不绕过无效 HTTPS 证书
+
+          ### 升级说明
+
+          本版本与 v1.1.0 正式版使用相同固定签名，可以直接覆盖安装。
+
+          固定签名证书 SHA-256：
+
+          `d29d3f581d1a90b12a067317c6f7295783727e1573e7c283e09ef398ca64b799`
+          EOF
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TITLE" --notes-file release-notes.md --latest
+          else
+            gh release create "$RELEASE_TAG" dist/* --target main --title "$RELEASE_TITLE" --notes-file release-notes.md --latest
+          fi
