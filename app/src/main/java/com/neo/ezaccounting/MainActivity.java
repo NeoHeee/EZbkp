@@ -56,6 +56,10 @@ public class MainActivity extends FragmentActivity {
     private static final String KEY_LOCAL_URL = "local_url";
     private static final String KEY_PUBLIC_URL = "public_url";
     private static final String KEY_LAST_ROUTE = "last_route";
+    private static final String KEY_LOCAL_LATENCY = "local_latency_ms";
+    private static final String KEY_PUBLIC_LATENCY = "public_latency_ms";
+    private static final String KEY_LAST_UPDATE_CHECK = "last_update_check";
+    private static final long AUTO_UPDATE_INTERVAL_MS = 24L * 60L * 60L * 1000L;
 
     private static final int FILE_CHOOSER_REQUEST = 1010;
     private static final int STORAGE_PERMISSION_REQUEST = 1011;
@@ -85,6 +89,25 @@ public class MainActivity extends FragmentActivity {
     private long backgroundAt;
     private boolean forceRelock;
     private boolean screenReceiverRegistered;
+    private boolean downloadReceiverRegistered;
+    private boolean routeCheckInProgress;
+    private long lastUnlockAt;
+    private long lastDownloadId = -1L;
+    private String lastDownloadFileName = "";
+    private String pendingShortcutAction;
+    private Uri pendingCameraUri;
+    private RouteManager routeManager;
+    private RouteManager.Selection lastRouteSelection;
+    private NetworkMonitor networkMonitor;
+
+    private final BroadcastReceiver downloadCompleteReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(intent.getAction())) return;
+            long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L);
+            if (id == lastDownloadId) showDownloadedFileDialog(id, lastDownloadFileName);
+        }
+    };
 
     private final BroadcastReceiver screenOffReceiver = new BroadcastReceiver() {
         @Override
@@ -109,10 +132,19 @@ public class MainActivity extends FragmentActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        UiTheme.applySystemBars(this);
         preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
         localUrl = preferences.getString(KEY_LOCAL_URL, "");
         publicUrl = preferences.getString(KEY_PUBLIC_URL, "");
+        pendingShortcutAction = ShortcutActions.read(getIntent());
+        routeManager = new RouteManager();
+        networkMonitor = new NetworkMonitor(this, this::onDefaultNetworkChanged);
         registerScreenOffReceiver();
+        registerDownloadReceiver();
+
+        if (ShortcutActions.LOCK.equals(pendingShortcutAction) && AppSecurity.isEnabled(this)) {
+            pendingShortcutAction = null;
+        }
 
         if (AppSecurity.isEnabled(this)) {
             showLoadingScreen("请完成安全验证…");
@@ -122,11 +154,52 @@ public class MainActivity extends FragmentActivity {
         }
     }
 
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String action = ShortcutActions.read(intent);
+        if (action == null) return;
+        pendingShortcutAction = action;
+        if (appInitialized && !authFlowInProgress) {
+            getWindow().getDecorView().post(this::handlePendingShortcutAction);
+        }
+    }
+
     private void initializeApp() {
         if (appInitialized) return;
         appInitialized = true;
-        if (hasSavedRoutes()) launchPreferredRoute(true);
-        else showServerSetup();
+        if (ShortcutActions.ROUTES.equals(pendingShortcutAction)) {
+            pendingShortcutAction = null;
+            showServerSetup();
+        } else if (hasSavedRoutes()) {
+            launchPreferredRoute(true);
+        } else {
+            showServerSetup();
+        }
+        getWindow().getDecorView().post(() -> {
+            handlePendingShortcutAction();
+            scheduleAutomaticUpdateCheck();
+        });
+    }
+
+    private void handlePendingShortcutAction() {
+        if (authFlowInProgress || pendingShortcutAction == null) return;
+        String action = pendingShortcutAction;
+        pendingShortcutAction = null;
+        if (ShortcutActions.ROUTES.equals(action)) {
+            showServerSetup();
+        } else if (ShortcutActions.SECURITY.equals(action)) {
+            if (!AppSecurity.isEnabled(this) || System.currentTimeMillis() - lastUnlockAt < 10000L) {
+                openSecuritySettings();
+            } else {
+                requestSecuritySettings();
+            }
+        } else if (ShortcutActions.LOCK.equals(action)) {
+            lockImmediately();
+        } else if (ShortcutActions.UPDATE.equals(action)) {
+            checkForUpdates(true);
+        }
     }
 
     private void requestAppUnlock() {
@@ -147,7 +220,7 @@ public class MainActivity extends FragmentActivity {
 
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
-        scrollView.setBackgroundColor(Color.rgb(245, 248, 248));
+        scrollView.setBackgroundColor(UiTheme.background(this));
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -174,7 +247,7 @@ public class MainActivity extends FragmentActivity {
         TextView title = new TextView(this);
         title.setText("配置 ezBookkeeping 地址");
         title.setTextSize(24);
-        title.setTextColor(Color.rgb(20, 35, 35));
+        title.setTextColor(UiTheme.primaryText(this));
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         title.setGravity(Gravity.CENTER);
         content.addView(title, matchWrap(dp(10)));
@@ -182,7 +255,7 @@ public class MainActivity extends FragmentActivity {
         TextView description = new TextView(this);
         description.setText("可同时填写本地地址和公网地址。保存后，应用会在每次启动时自动优先测试本地线路，失败后再回退到公网线路。\n\n建议：\n本地地址填写 NAS 局域网地址\n公网地址填写反向代理 HTTPS 地址");
         description.setTextSize(14.5f);
-        description.setTextColor(Color.rgb(80, 95, 95));
+        description.setTextColor(UiTheme.secondaryText(this));
         description.setGravity(Gravity.CENTER);
         description.setLineSpacing(0, 1.18f);
         content.addView(description, matchWrap(dp(24)));
@@ -213,7 +286,7 @@ public class MainActivity extends FragmentActivity {
         TextView note = new TextView(this);
         note.setText("进入记账界面后不会显示额外顶部栏。\n下拉页面可刷新；双指快速双击可打开隐藏功能菜单。\n公网访问建议使用有效 HTTPS 证书，应用不会忽略无效证书。\n地址与安全设置仅保存在本机。");
         note.setTextSize(12.5f);
-        note.setTextColor(Color.rgb(105, 120, 120));
+        note.setTextColor(UiTheme.tertiaryText(this));
         note.setGravity(Gravity.CENTER);
         note.setLineSpacing(0, 1.15f);
         content.addView(note, matchWrap(dp(22)));
@@ -246,7 +319,7 @@ public class MainActivity extends FragmentActivity {
         TextView label = new TextView(this);
         label.setText(text);
         label.setTextSize(14.5f);
-        label.setTextColor(Color.rgb(26, 51, 51));
+        label.setTextColor(UiTheme.primaryText(this));
         label.setTypeface(null, android.graphics.Typeface.BOLD);
         return label;
     }
@@ -258,69 +331,96 @@ public class MainActivity extends FragmentActivity {
         input.setText(value == null ? "" : value);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         input.setTextSize(16);
+        input.setTextColor(UiTheme.primaryText(this));
+        input.setHintTextColor(UiTheme.tertiaryText(this));
         input.setPadding(dp(16), dp(13), dp(16), dp(13));
         GradientDrawable background = new GradientDrawable();
-        background.setColor(Color.WHITE);
-        background.setStroke(dp(1), Color.rgb(196, 210, 208));
+        background.setColor(UiTheme.surface(this));
+        background.setStroke(dp(1), UiTheme.border(this));
         background.setCornerRadius(dp(14));
         input.setBackground(background);
         return input;
     }
 
     private void launchPreferredRoute(boolean fromStartup) {
-        showLoadingScreen("正在检测可用线路…");
-        new Thread(() -> {
-            RouteSelection selection = determinePreferredRoute();
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed()) return;
-                if (selection.url == null) {
-                    Toast.makeText(this, "没有可用线路，请检查本地地址、公网地址或网络连接",
-                            Toast.LENGTH_LONG).show();
-                    showServerSetup();
-                    return;
-                }
-                activeBaseUrl = selection.url;
-                activeRoute = selection.routeType;
-                preferences.edit().putString(KEY_LAST_ROUTE, activeBaseUrl).apply();
-                showWebClient(activeBaseUrl);
-                if (!fromStartup) {
-                    Toast.makeText(this,
-                            activeRoute == ROUTE_LOCAL ? "已切换到本地线路" : "已切换到公网线路",
-                            Toast.LENGTH_SHORT).show();
-                }
-            });
-        }).start();
+        recheckRoutes(fromStartup, false);
     }
 
-    private RouteSelection determinePreferredRoute() {
-        if (!isBlank(localUrl) && isReachable(localUrl, 1400)) return new RouteSelection(localUrl, ROUTE_LOCAL);
-        if (!isBlank(publicUrl) && isReachable(publicUrl, 2400)) return new RouteSelection(publicUrl, ROUTE_PUBLIC);
-        return new RouteSelection(null, ROUTE_NONE);
+    private void recheckRoutes(boolean fromStartup, boolean networkTriggered) {
+        if (routeCheckInProgress || routeManager == null) return;
+        routeCheckInProgress = true;
+        if (fromStartup && webView == null) showLoadingScreen("正在并行检测可用线路…");
+        String lastRoute = preferences.getString(KEY_LAST_ROUTE, "");
+        routeManager.selectAsync(localUrl, publicUrl, lastRoute, selection -> {
+            routeCheckInProgress = false;
+            if (isFinishing() || isDestroyed()) return;
+            applyRouteSelection(selection, fromStartup, networkTriggered);
+        });
     }
 
-    private boolean isReachable(String urlString, int timeoutMs) {
-        HttpURLConnection connection = null;
-        try {
-            connection = (HttpURLConnection) new URL(urlString).openConnection();
-            connection.setConnectTimeout(timeoutMs);
-            connection.setReadTimeout(timeoutMs);
-            connection.setInstanceFollowRedirects(false);
-            connection.setRequestMethod("GET");
-            connection.setRequestProperty("User-Agent", "EZAccounting/1.3.0");
-            connection.connect();
-            int code = connection.getResponseCode();
-            return (code >= 200 && code < 400) || code == 401 || code == 403;
-        } catch (Exception ignored) {
-            return false;
-        } finally {
-            if (connection != null) connection.disconnect();
+    private void applyRouteSelection(RouteManager.Selection selection, boolean fromStartup,
+                                     boolean networkTriggered) {
+        lastRouteSelection = selection;
+        preferences.edit()
+                .putLong(KEY_LOCAL_LATENCY, selection.local == null ? -1L : selection.local.latencyMs)
+                .putLong(KEY_PUBLIC_LATENCY,
+                        selection.publicRoute == null ? -1L : selection.publicRoute.latencyMs)
+                .apply();
+
+        if (!selection.hasRoute()) {
+            if (fromStartup || webView == null) {
+                Toast.makeText(this, "没有可用线路，请检查地址或网络连接", Toast.LENGTH_LONG).show();
+                showServerSetup();
+            } else if (!networkTriggered) {
+                Toast.makeText(this, "当前两条线路都不可用", Toast.LENGTH_LONG).show();
+            }
+            return;
         }
+
+        RouteManager.ProbeResult selected = selection.selected;
+        preferences.edit().putString(KEY_LAST_ROUTE, selected.url).apply();
+        boolean changed = activeBaseUrl == null || !activeBaseUrl.equals(selected.url);
+        String targetUrl = changed ? remapCurrentUrl(selected.url) : selected.url;
+        activeBaseUrl = selected.url;
+        activeRoute = selected.type;
+
+        if (webView == null) {
+            showWebClient(targetUrl);
+        } else if (changed) {
+            fallbackAttempted = false;
+            webView.loadUrl(targetUrl);
+            Toast.makeText(this, "已自动切换到" + routeName(activeRoute) +
+                    "（" + selected.latencyMs + " ms）", Toast.LENGTH_SHORT).show();
+        } else if (!fromStartup && !networkTriggered) {
+            Toast.makeText(this, "当前使用" + routeName(activeRoute) +
+                    "，延迟 " + selected.latencyMs + " ms", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String remapCurrentUrl(String newBaseUrl) {
+        if (webView == null || activeBaseUrl == null || webView.getUrl() == null) return newBaseUrl;
+        try {
+            URI oldBase = new URI(activeBaseUrl);
+            URI current = new URI(webView.getUrl());
+            if (!WebOriginPolicy.isSameOrigin(activeBaseUrl, current.toString())) return newBaseUrl;
+            URI nextBase = new URI(newBaseUrl);
+            return new URI(nextBase.getScheme(), nextBase.getAuthority(), current.getPath(),
+                    current.getQuery(), current.getFragment()).toString();
+        } catch (Exception ignored) {
+            return newBaseUrl;
+        }
+    }
+
+    private String routeName(int routeType) {
+        return routeType == ROUTE_LOCAL ? "本地线路" :
+                routeType == ROUTE_PUBLIC ? "公网线路" : "未知线路";
     }
 
     private void showLoadingScreen(String text) {
         showingWebView = false;
+        UiTheme.applySystemBars(this);
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.WHITE);
+        root.setBackgroundColor(UiTheme.background(this));
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
@@ -329,7 +429,7 @@ public class MainActivity extends FragmentActivity {
         TextView message = new TextView(this);
         message.setText(text);
         message.setTextSize(15);
-        message.setTextColor(Color.rgb(70, 86, 86));
+        message.setTextColor(UiTheme.secondaryText(this));
         message.setPadding(0, dp(14), 0, 0);
         box.addView(message);
         root.addView(box, new FrameLayout.LayoutParams(
@@ -375,11 +475,15 @@ public class MainActivity extends FragmentActivity {
         showingWebView = true;
         hasLoadedSuccessfully = false;
         fallbackAttempted = false;
+        UiTheme.applySystemBars(this);
         FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(UiTheme.webBackground(this));
         swipeRefreshLayout = new SwipeRefreshLayout(this);
-        swipeRefreshLayout.setColorSchemeColors(Color.rgb(13, 148, 136));
+        swipeRefreshLayout.setColorSchemeColors(UiTheme.accent(this));
+        swipeRefreshLayout.setProgressBackgroundColorSchemeColor(UiTheme.surface(this));
         swipeRefreshLayout.setOnRefreshListener(() -> { if (webView != null) webView.reload(); });
         webView = new WebView(this);
+        webView.setBackgroundColor(UiTheme.webBackground(this));
         swipeRefreshLayout.addView(webView, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         root.addView(swipeRefreshLayout, new FrameLayout.LayoutParams(
@@ -390,7 +494,7 @@ public class MainActivity extends FragmentActivity {
         webView.loadUrl(url);
     }
 
-    @SuppressWarnings("SetJavaScriptEnabled")
+    @SuppressWarnings({"SetJavaScriptEnabled", "deprecation"})
     private void configureWebView() {
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -405,13 +509,19 @@ public class MainActivity extends FragmentActivity {
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
+        boolean darkMode = UiTheme.isDark(this);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            settings.setAlgorithmicDarkeningAllowed(darkMode);
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            settings.setForceDark(darkMode ? WebSettings.FORCE_DARK_ON : WebSettings.FORCE_DARK_OFF);
+        }
         boolean secureOrigin = activeBaseUrl != null &&
                 "https".equalsIgnoreCase(Uri.parse(activeBaseUrl).getScheme());
         settings.setMixedContentMode(secureOrigin ?
                 WebSettings.MIXED_CONTENT_NEVER_ALLOW :
                 WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.3.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.4.0");
 
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
@@ -450,20 +560,16 @@ public class MainActivity extends FragmentActivity {
                                              FileChooserParams params) {
                 if (filePathCallback != null) filePathCallback.onReceiveValue(null);
                 filePathCallback = callback;
-                Intent intent;
-                try { intent = params.createIntent(); }
-                catch (Exception ignored) {
-                    intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                    intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    intent.setType("*/*");
-                }
                 try {
-                    startActivityForResult(Intent.createChooser(intent, "选择账单、图片或附件"),
-                            FILE_CHOOSER_REQUEST);
+                    FileChooserSupport.Request request = FileChooserSupport.create(MainActivity.this, params);
+                    pendingCameraUri = request.cameraUri;
+                    startActivityForResult(request.chooserIntent, FILE_CHOOSER_REQUEST);
                     return true;
-                } catch (ActivityNotFoundException error) {
+                } catch (Exception error) {
                     filePathCallback = null;
-                    Toast.makeText(MainActivity.this, "没有可用的文件选择器", Toast.LENGTH_SHORT).show();
+                    pendingCameraUri = null;
+                    Toast.makeText(MainActivity.this, "无法打开照片或文件选择器",
+                            Toast.LENGTH_LONG).show();
                     return false;
                 }
             }
@@ -567,16 +673,18 @@ public class MainActivity extends FragmentActivity {
 
     private void openQuickActions() {
         CharSequence[] items = {
-                "返回首页", "重新检测线路", "在浏览器中打开", "更换线路地址",
-                "立即锁定", "进入 App 的安全验证", "清除登录与缓存", "WebView 信息"
+                "返回首页", "线路状态与测速", "在浏览器中打开", "更换线路地址",
+                "立即锁定", "进入 App 的安全验证", "检查更新",
+                "清除登录与缓存", "WebView 信息"
         };
+        String title = activeRoute == ROUTE_LOCAL ? "隐藏功能菜单（当前：本地线路）" :
+                activeRoute == ROUTE_PUBLIC ? "隐藏功能菜单（当前：公网线路）" : "隐藏功能菜单";
         new AlertDialog.Builder(this)
-                .setTitle(activeRoute == ROUTE_LOCAL ? "隐藏功能菜单（当前：本地线路）" :
-                        activeRoute == ROUTE_PUBLIC ? "隐藏功能菜单（当前：公网线路）" : "隐藏功能菜单")
+                .setTitle(title)
                 .setItems(items, (dialog, which) -> {
                     switch (which) {
                         case 0: if (webView != null) webView.loadUrl(activeBaseUrl); break;
-                        case 1: launchPreferredRoute(false); break;
+                        case 1: showRouteStatusAndRetest(); break;
                         case 2:
                             if (webView != null) openExternal(Uri.parse(
                                     webView.getUrl() == null ? activeBaseUrl : webView.getUrl()));
@@ -584,18 +692,36 @@ public class MainActivity extends FragmentActivity {
                         case 3: confirmChangeServer(); break;
                         case 4: lockImmediately(); break;
                         case 5: requestSecuritySettings(); break;
-                        case 6: confirmClearSiteData(); break;
-                        case 7:
+                        case 6: checkForUpdates(true); break;
+                        case 7: confirmClearSiteData(); break;
+                        case 8:
                             try { startActivity(new Intent(Settings.ACTION_WEBVIEW_SETTINGS)); }
                             catch (Exception ignored) {
                                 Toast.makeText(this, WebView.getCurrentWebViewPackage() == null ?
-                                                "无法读取 WebView 信息" : WebView.getCurrentWebViewPackage().packageName,
+                                                "无法读取 WebView 信息" :
+                                                WebView.getCurrentWebViewPackage().packageName,
                                         Toast.LENGTH_LONG).show();
                             }
                             break;
                     }
                 })
                 .setNegativeButton("关闭", null)
+                .show();
+    }
+
+    private void showRouteStatusAndRetest() {
+        recheckRoutes(false, false);
+        RouteManager.Selection selection = lastRouteSelection;
+        String localStatus = selection == null || selection.local == null ? "等待测速" : selection.local.label();
+        String publicStatus = selection == null || selection.publicRoute == null ?
+                "等待测速" : selection.publicRoute.label();
+        new AlertDialog.Builder(this)
+                .setTitle("线路状态")
+                .setMessage("当前线路：" + routeName(activeRoute) +
+                        "\n本地线路：" + localStatus +
+                        "\n公网线路：" + publicStatus +
+                        "\n\n已在后台重新测速；网络变化时会自动重新判断并保留当前页面路径。")
+                .setPositiveButton("知道了", null)
                 .show();
     }
 
@@ -673,14 +799,22 @@ public class MainActivity extends FragmentActivity {
 
     private DownloadListener createDownloadListener() {
         return (url, userAgent, contentDisposition, mimeType, contentLength) -> {
+            if (url != null && (url.startsWith("blob:") || url.startsWith("data:"))) {
+                Toast.makeText(this, "该导出文件由网页即时生成，请使用“在浏览器中打开”后下载",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
             if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
-                    checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, STORAGE_PERMISSION_REQUEST);
+                    checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+                            PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                        STORAGE_PERMISSION_REQUEST);
                 Toast.makeText(this, "授权后请再次点击下载", Toast.LENGTH_SHORT).show();
                 return;
             }
             try {
-                String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
+                String guessed = URLUtil.guessFileName(url, contentDisposition, mimeType);
+                String fileName = uniqueDownloadName(guessed);
                 DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
                 request.setMimeType(mimeType);
                 request.addRequestHeader("User-Agent", userAgent);
@@ -688,9 +822,14 @@ public class MainActivity extends FragmentActivity {
                 if (cookies != null) request.addRequestHeader("Cookie", cookies);
                 request.setTitle(fileName);
                 request.setDescription("EZ记账正在下载");
-                request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
-                ((DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE)).enqueue(request);
+                request.setNotificationVisibility(
+                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS,
+                        "EZ记账/" + fileName);
+                DownloadManager manager =
+                        (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+                lastDownloadId = manager.enqueue(request);
+                lastDownloadFileName = fileName;
                 Toast.makeText(this, "已开始下载：" + fileName, Toast.LENGTH_SHORT).show();
             } catch (Exception error) {
                 Toast.makeText(this, "下载失败，可尝试用浏览器打开", Toast.LENGTH_LONG).show();
@@ -698,12 +837,23 @@ public class MainActivity extends FragmentActivity {
         };
     }
 
+    private String uniqueDownloadName(String original) {
+        String name = original == null || original.trim().isEmpty() ? "EZ记账导出" : original.trim();
+        name = name.replaceAll("[\\/:*?\"<>|]", "_");
+        int dot = name.lastIndexOf('.');
+        String suffix = "-" + System.currentTimeMillis();
+        if (dot > 0) return name.substring(0, dot) + suffix + name.substring(dot);
+        return name + suffix;
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == FILE_CHOOSER_REQUEST && filePathCallback != null) {
-            filePathCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+            filePathCallback.onReceiveValue(
+                    FileChooserSupport.parseResult(resultCode, data, pendingCameraUri));
             filePathCallback = null;
+            pendingCameraUri = null;
             return;
         }
         if (requestCode == REQUEST_UNLOCK_APP) {
@@ -711,7 +861,9 @@ public class MainActivity extends FragmentActivity {
             backgroundAt = 0;
             if (resultCode == Activity.RESULT_OK) {
                 forceRelock = false;
+                lastUnlockAt = System.currentTimeMillis();
                 if (!appInitialized) initializeApp();
+                else getWindow().getDecorView().post(this::handlePendingShortcutAction);
             } else {
                 finishAndRemoveTask();
             }
@@ -726,6 +878,101 @@ public class MainActivity extends FragmentActivity {
             authFlowInProgress = false;
             backgroundAt = 0;
         }
+    }
+
+    private void checkForUpdates(boolean userInitiated) {
+        if (userInitiated) Toast.makeText(this, "正在检查更新…", Toast.LENGTH_SHORT).show();
+        UpdateChecker.checkAsync(BuildConfig.VERSION_NAME, result -> {
+            preferences.edit().putLong(KEY_LAST_UPDATE_CHECK, System.currentTimeMillis()).apply();
+            if (!result.success) {
+                if (userInitiated) {
+                    new AlertDialog.Builder(this)
+                            .setTitle("检查更新失败")
+                            .setMessage(result.error == null ? "网络请求失败" : result.error)
+                            .setPositiveButton("知道了", null)
+                            .show();
+                }
+                return;
+            }
+            if (!result.updateAvailable) {
+                if (userInitiated) {
+                    new AlertDialog.Builder(this)
+                            .setTitle("已是最新版本")
+                            .setMessage("当前版本：" + BuildConfig.VERSION_NAME +
+                                    "\n最新版本：" + result.latestVersion)
+                            .setPositiveButton("知道了", null)
+                            .show();
+                }
+                return;
+            }
+            String notes = result.notes == null ? "暂无更新说明" : result.notes.trim();
+            if (notes.length() > 1200) notes = notes.substring(0, 1200) + "…";
+            AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                    .setTitle(result.releaseName == null || result.releaseName.isEmpty() ?
+                            "发现新版本 " + result.latestVersion : result.releaseName)
+                    .setMessage("当前版本：" + BuildConfig.VERSION_NAME +
+                            "\n最新版本：" + result.latestVersion + "\n\n" + notes)
+                    .setNegativeButton("稍后", null);
+            String downloadUrl = result.apkUrl == null || result.apkUrl.isEmpty() ?
+                    result.releaseUrl : result.apkUrl;
+            if (downloadUrl != null && !downloadUrl.isEmpty()) {
+                builder.setPositiveButton("下载更新",
+                        (dialog, which) -> openExternal(Uri.parse(downloadUrl)));
+            }
+            builder.show();
+        });
+    }
+
+    private void scheduleAutomaticUpdateCheck() {
+        long last = preferences.getLong(KEY_LAST_UPDATE_CHECK, 0L);
+        if (System.currentTimeMillis() - last >= AUTO_UPDATE_INTERVAL_MS) {
+            checkForUpdates(false);
+        }
+    }
+
+    private void onDefaultNetworkChanged() {
+        if (!appInitialized || authFlowInProgress || webView == null || !hasSavedRoutes()) return;
+        recheckRoutes(false, true);
+    }
+
+    private void registerDownloadReceiver() {
+        if (downloadReceiverRegistered) return;
+        IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(downloadCompleteReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(downloadCompleteReceiver, filter);
+        }
+        downloadReceiverRegistered = true;
+    }
+
+    private void unregisterDownloadReceiver() {
+        if (!downloadReceiverRegistered) return;
+        try { unregisterReceiver(downloadCompleteReceiver); } catch (Exception ignored) {}
+        downloadReceiverRegistered = false;
+    }
+
+    private void showDownloadedFileDialog(long downloadId, String fileName) {
+        DownloadManager manager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+        Uri uri = manager.getUriForDownloadedFile(downloadId);
+        if (uri == null || isFinishing()) return;
+        String mime = manager.getMimeTypeForDownloadedFile(downloadId);
+        new AlertDialog.Builder(this)
+                .setTitle("下载完成")
+                .setMessage(fileName == null || fileName.isEmpty() ? "文件已保存到下载目录" :
+                        fileName + "\n已保存到下载目录/EZ记账")
+                .setNegativeButton("关闭", null)
+                .setPositiveButton("打开文件", (dialog, which) -> {
+                    try {
+                        Intent open = new Intent(Intent.ACTION_VIEW);
+                        open.setDataAndType(uri, mime == null ? "*/*" : mime);
+                        open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        startActivity(open);
+                    } catch (Exception error) {
+                        Toast.makeText(this, "没有可打开该文件的应用", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .show();
     }
 
     private void confirmChangeServer() {
@@ -776,6 +1023,12 @@ public class MainActivity extends FragmentActivity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        if (networkMonitor != null) networkMonitor.start();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         if (!appInitialized || authFlowInProgress || !AppSecurity.isEnabled(this)) return;
@@ -789,6 +1042,7 @@ public class MainActivity extends FragmentActivity {
 
     @Override
     protected void onStop() {
+        if (networkMonitor != null) networkMonitor.stop();
         super.onStop();
         if (!isChangingConfigurations() && !authFlowInProgress && appInitialized)
             backgroundAt = System.currentTimeMillis();
@@ -809,6 +1063,9 @@ public class MainActivity extends FragmentActivity {
     @Override
     protected void onDestroy() {
         unregisterScreenOffReceiver();
+        unregisterDownloadReceiver();
+        if (networkMonitor != null) networkMonitor.stop();
+        if (routeManager != null) routeManager.shutdown();
         destroyWebViewIfNeeded();
         super.onDestroy();
     }

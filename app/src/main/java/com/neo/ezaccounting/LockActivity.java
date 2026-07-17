@@ -50,6 +50,7 @@ public class LockActivity extends FragmentActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        UiTheme.applySystemBars(this);
         setFinishOnTouchOutside(false);
         buildBaseLayout();
         String mode = AppSecurity.getMode(this);
@@ -67,7 +68,7 @@ public class LockActivity extends FragmentActivity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
         root.setPadding(dp(28), dp(42), dp(28), dp(28));
-        root.setBackgroundColor(Color.rgb(245, 248, 248));
+        root.setBackgroundColor(UiTheme.background(this));
 
         TextView logo = new TextView(this);
         logo.setText("¥✓");
@@ -87,7 +88,7 @@ public class LockActivity extends FragmentActivity {
         TextView title = new TextView(this);
         title.setText("验证后进入 EZ记账");
         title.setTextSize(23);
-        title.setTextColor(Color.rgb(20, 35, 35));
+        title.setTextColor(UiTheme.primaryText(this));
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         title.setGravity(Gravity.CENTER);
         root.addView(title, fullWrap(dp(8)));
@@ -96,7 +97,7 @@ public class LockActivity extends FragmentActivity {
         String reason = getIntent().getStringExtra(EXTRA_REASON);
         message.setText(reason == null || reason.trim().isEmpty() ? normalPrompt : reason);
         message.setTextSize(14.5f);
-        message.setTextColor(Color.rgb(90, 105, 105));
+        message.setTextColor(UiTheme.secondaryText(this));
         message.setGravity(Gravity.CENTER);
         root.addView(message, fullWrap(dp(24)));
         setContentView(root);
@@ -113,7 +114,7 @@ public class LockActivity extends FragmentActivity {
         pinInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4)});
         pinInput.setHint("••••");
         pinInput.setPadding(dp(16), dp(12), dp(16), dp(12));
-        pinInput.setBackground(roundedBox(Color.WHITE, Color.rgb(196, 210, 208), 14));
+        pinInput.setBackground(roundedBox(UiTheme.surface(this), UiTheme.border(this), 14));
         root.addView(pinInput, fullWrap(dp(16)));
 
         unlockButton = primaryButton("解锁");
@@ -159,7 +160,7 @@ public class LockActivity extends FragmentActivity {
         TextView hint = new TextView(this);
         hint.setText("至少连接四个点");
         hint.setTextSize(13);
-        hint.setTextColor(Color.rgb(105, 120, 120));
+        hint.setTextColor(UiTheme.tertiaryText(this));
         hint.setGravity(Gravity.CENTER);
         root.addView(hint, fullWrap(dp(6)));
 
@@ -341,9 +342,9 @@ public class LockActivity extends FragmentActivity {
         Button button = new Button(this);
         button.setText(text);
         button.setTextSize(15);
-        button.setTextColor(Color.rgb(45, 70, 70));
+        button.setTextColor(UiTheme.primaryText(this));
         button.setAllCaps(false);
-        button.setBackground(roundedBox(Color.WHITE, Color.rgb(196, 210, 208), 14));
+        button.setBackground(roundedBox(UiTheme.surface(this), UiTheme.border(this), 14));
         return button;
     }
 

@@ -33,14 +33,14 @@ public class PatternLockView extends View {
         setBackgroundColor(Color.TRANSPARENT);
         circlePaint.setStyle(Paint.Style.STROKE);
         circlePaint.setStrokeWidth(dp(2));
-        circlePaint.setColor(Color.rgb(155, 170, 168));
+        circlePaint.setColor(UiTheme.border(getContext()));
         selectedPaint.setStyle(Paint.Style.FILL);
-        selectedPaint.setColor(Color.rgb(13, 148, 136));
+        selectedPaint.setColor(UiTheme.accent(getContext()));
         linePaint.setStyle(Paint.Style.STROKE);
         linePaint.setStrokeWidth(dp(5));
         linePaint.setStrokeCap(Paint.Cap.ROUND);
         linePaint.setStrokeJoin(Paint.Join.ROUND);
-        linePaint.setColor(Color.rgb(13, 148, 136));
+        linePaint.setColor(UiTheme.accent(getContext()));
         linePaint.setAlpha(180);
     }
 
@@ -82,7 +82,7 @@ public class PatternLockView extends View {
         }
 
         Paint inner = new Paint(Paint.ANTI_ALIAS_FLAG);
-        inner.setColor(Color.WHITE);
+        inner.setColor(UiTheme.surface(getContext()));
         for (int i = 0; i < 9; i++) {
             float x = nodeX(i);
             float y = nodeY(i);
