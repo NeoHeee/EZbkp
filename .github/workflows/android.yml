@@ -115,16 +115,16 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Commit integrated source
+      - name: Commit integrated app source
         if: ${{ github.event_name == 'pull_request' && hashFiles('scripts/apply_v130.py') == '' }}
         shell: bash
         run: |
-          if git diff --quiet && git diff --cached --quiet; then
-            echo 'No integration changes to commit.'
-            exit 0
-          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
+          git add app README.md
+          if git diff --cached --quiet; then
+            echo 'No app source changes to commit.'
+            exit 0
+          fi
           git commit -m 'feat: integrate v1.3.0 stability and security hardening'
           git push origin HEAD:${{ github.head_ref }}
