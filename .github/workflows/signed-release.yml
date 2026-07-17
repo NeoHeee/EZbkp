@@ -94,10 +94,13 @@ jobs:
           mkdir -p dist
           APK='app/build/outputs/apk/release/app-release.apk'
           OUTPUT='dist/EZ记账-v1.1.0-signed.apk'
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+
+          test -x "$APKSIGNER" || { echo "apksigner not found: $APKSIGNER"; exit 1; }
           cp "$APK" "$OUTPUT"
 
           set +e
-          CERT_OUTPUT="$(apksigner verify --verbose --print-certs "$OUTPUT" 2>&1)"
+          CERT_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$OUTPUT" 2>&1)"
           VERIFY_STATUS=$?
           set -e
 
