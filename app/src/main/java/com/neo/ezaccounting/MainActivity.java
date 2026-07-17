@@ -290,7 +290,7 @@ public class MainActivity extends FragmentActivity {
             connection.setReadTimeout(timeoutMs);
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod("GET");
-            connection.setRequestProperty("User-Agent", "EZAccounting/1.2.0");
+            connection.setRequestProperty("User-Agent", "EZAccounting/1.2.1");
             connection.connect();
             int code = connection.getResponseCode();
             return (code >= 200 && code < 400) || code == 401 || code == 403;
@@ -389,7 +389,7 @@ public class MainActivity extends FragmentActivity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.2.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.2.1");
 
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
@@ -645,8 +645,11 @@ public class MainActivity extends FragmentActivity {
         if (requestCode == REQUEST_UNLOCK_APP) {
             authFlowInProgress = false;
             backgroundAt = 0;
-            if (resultCode == Activity.RESULT_OK) initializeApp();
-            else finishAndRemoveTask();
+            if (resultCode == Activity.RESULT_OK) {
+                if (!appInitialized) initializeApp();
+            } else {
+                finishAndRemoveTask();
+            }
             return;
         }
         if (requestCode == REQUEST_VERIFY_SETTINGS) {
@@ -693,7 +696,7 @@ public class MainActivity extends FragmentActivity {
         if (!appInitialized || authFlowInProgress || !AppSecurity.isEnabled(this)) return;
         if (backgroundAt > 0 && System.currentTimeMillis() - backgroundAt >= BACKGROUND_RELOCK_MS) {
             backgroundAt = 0;
-            showLoadingScreen("请重新验证身份…");
+            // Keep the existing page mounted under LockActivity.
             requestAppUnlock();
         }
     }
