@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="routes"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_routes"
+        android:shortcutShortLabel="@string/shortcut_routes_short"
+        android:shortcutLongLabel="@string/shortcut_routes_long">
+        <intent
+            android:action="com.neo.ezaccounting.action.ROUTES"
+            android:targetPackage="com.neo.ezaccounting"
+            android:targetClass="com.neo.ezaccounting.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="security"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_security"
+        android:shortcutShortLabel="@string/shortcut_security_short"
+        android:shortcutLongLabel="@string/shortcut_security_long">
+        <intent
+            android:action="com.neo.ezaccounting.action.SECURITY"
+            android:targetPackage="com.neo.ezaccounting"
+            android:targetClass="com.neo.ezaccounting.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="lock"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_lock"
+        android:shortcutShortLabel="@string/shortcut_lock_short"
+        android:shortcutLongLabel="@string/shortcut_lock_long">
+        <intent
+            android:action="com.neo.ezaccounting.action.LOCK"
+            android:targetPackage="com.neo.ezaccounting"
+            android:targetClass="com.neo.ezaccounting.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="update"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_update"
+        android:shortcutShortLabel="@string/shortcut_update_short"
+        android:shortcutLongLabel="@string/shortcut_update_long">
+        <intent
+            android:action="com.neo.ezaccounting.action.UPDATE"
+            android:targetPackage="com.neo.ezaccounting"
+            android:targetClass="com.neo.ezaccounting.MainActivity" />
+    </shortcut>
+</shortcuts>
