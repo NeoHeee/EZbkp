@@ -45,6 +45,28 @@ jobs:
           chmod 600 "$KEYSTORE_PATH"
           echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
+      - name: Verify fixed keystore certificate
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          KEYSTORE_CERT_SHA256="$(keytool -list -v \
+            -keystore "$ANDROID_KEYSTORE_PATH" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" \
+            | awk -F'SHA256: ' '/SHA256:/{print $2; exit}' \
+            | tr -d '[:space:]' \
+            | tr -d ':' \
+            | tr '[:upper:]' '[:lower:]')"
+
+          test -n "$KEYSTORE_CERT_SHA256" || { echo 'Could not read keystore certificate SHA-256'; exit 1; }
+          if [ "$KEYSTORE_CERT_SHA256" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "Unexpected keystore certificate: $KEYSTORE_CERT_SHA256"
+            exit 1
+          fi
+          echo "Fixed keystore certificate verified: $KEYSTORE_CERT_SHA256"
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -69,7 +91,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle --no-daemon :app:assembleRelease
 
-      - name: Verify signature and prepare release assets
+      - name: Verify APK signature and prepare release assets
         shell: bash
         run: |
           mkdir -p dist
@@ -82,17 +104,9 @@ jobs:
           test -n "$APKSIGNER" || { echo 'apksigner not found'; exit 1; }
 
           cp "$APK" "$OUTPUT"
-          CERT_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$OUTPUT")"
-          printf '%s\n' "$CERT_OUTPUT" | tee "$CERT_INFO"
-
-          ACTUAL_CERT_SHA256="$(printf '%s\n' "$CERT_OUTPUT" | awk -F': ' '/certificate SHA-256 digest/{print $2; exit}' | tr -d '[:space:]' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          test -n "$ACTUAL_CERT_SHA256" || { echo 'Could not parse signing certificate SHA-256'; exit 1; }
-
-          if [ "$ACTUAL_CERT_SHA256" != "$EXPECTED_CERT_SHA256" ]; then
-            echo "Unexpected signing certificate: $ACTUAL_CERT_SHA256"
-            exit 1
-          fi
-
+          "$APKSIGNER" verify "$OUTPUT"
+          "$APKSIGNER" verify --verbose --print-certs "$OUTPUT" > "$CERT_INFO" 2>&1 || true
+          cat "$CERT_INFO"
           sha256sum "$OUTPUT" > "$OUTPUT.sha256"
 
       - name: Write release notes
