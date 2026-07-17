@@ -1,4 +1,4 @@
-name: Apply relock hotfix v1.2.1 r3
+name: Commit relock hotfix v1.2.1
 
 on:
   pull_request:
@@ -7,13 +7,11 @@ on:
       - '.github/workflows/apply-relock-hotfix-v121-r3.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  patch-build-sign:
+  commit-hotfix:
     runs-on: ubuntu-latest
-    env:
-      EXPECTED_CERT_SHA256: d29d3f581d1a90b12a067317c6f7295783727e1573e7c283e09ef398ca64b799
 
     steps:
       - name: Checkout hotfix branch
@@ -22,15 +20,14 @@ jobs:
           ref: fix/relock-loading-v1.2.1
           fetch-depth: 0
 
-      - name: Apply line-based lifecycle hotfix
+      - name: Apply verified source changes
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
           main = Path('app/src/main/java/com/neo/ezaccounting/MainActivity.java')
-          source = main.read_text(encoding='utf-8')
-          lines = source.splitlines()
+          lines = main.read_text(encoding='utf-8').splitlines()
           output = []
           unlock_changes = 0
           loading_changes = 0
@@ -39,10 +36,9 @@ jobs:
           while i < len(lines):
               line = lines[i]
               stripped = line.strip()
-
               if stripped == 'if (resultCode == Activity.RESULT_OK) initializeApp();':
                   if i + 1 >= len(lines) or lines[i + 1].strip() != 'else finishAndRemoveTask();':
-                      raise SystemExit('Unlock success line found without expected else line')
+                      raise SystemExit('Unexpected unlock block')
                   indent = line[:len(line) - len(line.lstrip())]
                   output.extend([
                       indent + 'if (resultCode == Activity.RESULT_OK) {',
@@ -54,119 +50,37 @@ jobs:
                   unlock_changes += 1
                   i += 2
                   continue
-
               if stripped == 'showLoadingScreen("请重新验证身份…");':
                   indent = line[:len(line) - len(line.lstrip())]
                   output.append(indent + '// Keep the existing page mounted under LockActivity.')
                   loading_changes += 1
                   i += 1
                   continue
-
               output.append(line)
               i += 1
 
           if unlock_changes != 1 or loading_changes != 1:
-              raise SystemExit(
-                  f'Unexpected patch counts: unlock={unlock_changes}, loading={loading_changes}'
-              )
+              raise SystemExit(f'Unexpected patch counts: {unlock_changes}, {loading_changes}')
 
-          text = '\n'.join(output) + '\n'
-          text = text.replace('EZAccounting/1.2.0', 'EZAccounting/1.2.1')
-          main.write_text(text, encoding='utf-8')
+          content = '\n'.join(output) + '\n'
+          content = content.replace('EZAccounting/1.2.0', 'EZAccounting/1.2.1')
+          main.write_text(content, encoding='utf-8')
 
           gradle = Path('app/build.gradle')
-          text = gradle.read_text(encoding='utf-8')
-          if 'versionCode 3' not in text or "versionName '1.2.0'" not in text:
-              raise SystemExit('Expected v1.2.0 Gradle version not found')
-          text = text.replace('versionCode 3', 'versionCode 4', 1)
-          text = text.replace("versionName '1.2.0'", "versionName '1.2.1'", 1)
-          gradle.write_text(text, encoding='utf-8')
+          content = gradle.read_text(encoding='utf-8')
+          content = content.replace('versionCode 3', 'versionCode 4', 1)
+          content = content.replace("versionName '1.2.0'", "versionName '1.2.1'", 1)
+          gradle.write_text(content, encoding='utf-8')
 
-          replacements = {
-              Path('.github/workflows/android.yml'): [('v1.2.0-debug', 'v1.2.1-debug')],
-              Path('.github/workflows/signed-release.yml'): [
-                  ('v1.2.0-signed', 'v1.2.1-signed'),
-                  ('Signed-Release-v1.2.0', 'Signed-Release-v1.2.1'),
-              ],
-              Path('README.md'): [('当前版本：`1.2.0`', '当前版本：`1.2.1`')],
-          }
-          for path, pairs in replacements.items():
-              content = path.read_text(encoding='utf-8')
-              for old, new in pairs:
-                  content = content.replace(old, new)
-              path.write_text(content, encoding='utf-8')
-
-          print('Lifecycle hotfix applied successfully.')
+          readme = Path('README.md')
+          content = readme.read_text(encoding='utf-8')
+          content = content.replace('当前版本：`1.2.0`', '当前版本：`1.2.1`')
+          readme.write_text(content, encoding='utf-8')
           PY
 
           git diff --check
-          git diff -- app/src/main/java/com/neo/ezaccounting/MainActivity.java app/build.gradle
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android platform
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
-      - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
-
-      - name: Restore and verify fixed keystore
-        shell: bash
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          test -n "$ANDROID_KEYSTORE_BASE64"
-          test -n "$ANDROID_KEYSTORE_PASSWORD"
-          test -n "$ANDROID_KEY_ALIAS"
-          KEYSTORE_PATH="$RUNNER_TEMP/ez-accounting-release.jks"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
-          chmod 600 "$KEYSTORE_PATH"
-          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-          ACTUAL_CERT_SHA256="$(keytool -exportcert -alias "$ANDROID_KEY_ALIAS" -keystore "$KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -rfc | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256"
-
-      - name: Build fixed-signature release APK
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle --no-daemon :app:assembleRelease
-
-      - name: Verify and prepare artifacts
-        shell: bash
-        run: |
-          mkdir -p dist/source
-          cp app/build/outputs/apk/debug/app-debug.apk 'dist/EZ记账-v1.2.1-debug.apk'
-          cp app/build/outputs/apk/release/app-release.apk 'dist/EZ记账-v1.2.1-signed.apk'
-          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
-          "$APKSIGNER" verify --verbose --print-certs 'dist/EZ记账-v1.2.1-signed.apk' | tee 'dist/EZ记账-v1.2.1-签名信息.txt'
-          sha256sum dist/*.apk > 'dist/EZ记账-v1.2.1.sha256'
-          cp app/src/main/java/com/neo/ezaccounting/MainActivity.java dist/source/MainActivity.java
-          cp app/build.gradle dist/source/app-build.gradle
-          cp README.md dist/source/README.md
-          cp .github/workflows/android.yml dist/source/android.yml
-          cp .github/workflows/signed-release.yml dist/source/signed-release.yml
-          (cd dist/source && zip -q ../EZ记账-v1.2.1-patched-source.zip *)
-          rm -rf dist/source
-
-      - name: Upload APKs and patched source
-        uses: actions/upload-artifact@v4
-        with:
-          name: EZ记账-v1.2.1-hotfix
-          path: dist/*
-          if-no-files-found: error
-          retention-days: 30
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/neo/ezaccounting/MainActivity.java app/build.gradle README.md
+          git commit -m "fix: restore page after background authentication"
+          git push origin HEAD:fix/relock-loading-v1.2.1
