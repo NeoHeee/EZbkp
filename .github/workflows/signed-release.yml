@@ -76,7 +76,7 @@ jobs:
         run: |
           mkdir -p dist
           APK='app/build/outputs/apk/release/app-release.apk'
-          OUTPUT='dist/EZ记账-v1.3.0-signed.apk'
+          OUTPUT='dist/EZ记账-v1.3.1-signed.apk'
           APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
           test -x "$APKSIGNER" || { echo "apksigner not found: $APKSIGNER"; exit 1; }
           cp "$APK" "$OUTPUT"
@@ -94,7 +94,7 @@ jobs:
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: EZ记账-Signed-Release-v1.3.0
+          name: EZ记账-Signed-Release-v1.3.1
           path: dist/*
           if-no-files-found: error
           retention-days: 90
