@@ -7,7 +7,7 @@ on:
       - '.github/workflows/apply-relock-hotfix-v121-r3.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   patch-build-sign:
@@ -101,11 +101,6 @@ jobs:
 
           git diff --check
           git diff -- app/src/main/java/com/neo/ezaccounting/MainActivity.java app/build.gradle
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java/com/neo/ezaccounting/MainActivity.java app/build.gradle README.md .github/workflows/android.yml .github/workflows/signed-release.yml
-          git commit -m "fix: restore page after background authentication"
-          git push origin HEAD:fix/relock-loading-v1.2.1
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -154,14 +149,21 @@ jobs:
       - name: Verify and prepare artifacts
         shell: bash
         run: |
-          mkdir -p dist
+          mkdir -p dist/source
           cp app/build/outputs/apk/debug/app-debug.apk 'dist/EZ记账-v1.2.1-debug.apk'
           cp app/build/outputs/apk/release/app-release.apk 'dist/EZ记账-v1.2.1-signed.apk'
           APKSIGNER="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
           "$APKSIGNER" verify --verbose --print-certs 'dist/EZ记账-v1.2.1-signed.apk' | tee 'dist/EZ记账-v1.2.1-签名信息.txt'
           sha256sum dist/*.apk > 'dist/EZ记账-v1.2.1.sha256'
+          cp app/src/main/java/com/neo/ezaccounting/MainActivity.java dist/source/MainActivity.java
+          cp app/build.gradle dist/source/app-build.gradle
+          cp README.md dist/source/README.md
+          cp .github/workflows/android.yml dist/source/android.yml
+          cp .github/workflows/signed-release.yml dist/source/signed-release.yml
+          (cd dist/source && zip -q ../EZ记账-v1.2.1-patched-source.zip *)
+          rm -rf dist/source
 
-      - name: Upload APKs
+      - name: Upload APKs and patched source
         uses: actions/upload-artifact@v4
         with:
           name: EZ记账-v1.2.1-hotfix
