@@ -14,11 +14,12 @@ public final class NetworkMonitor {
 
     private final ConnectivityManager connectivityManager;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Listener listener;
+    private Listener listener;
     private boolean registered;
 
     private final Runnable notifyChange = () -> {
-        if (registered) listener.onDefaultNetworkChanged();
+        Listener current = listener;
+        if (registered && current != null) current.onDefaultNetworkChanged();
     };
 
     private final ConnectivityManager.NetworkCallback callback =
