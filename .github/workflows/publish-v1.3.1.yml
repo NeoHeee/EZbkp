@@ -1,0 +1,144 @@
+name: Publish EZ记账 v1.3.1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v1.3.1.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    env:
+      EXPECTED_CERT_SHA256: d29d3f581d1a90b12a067317c6f7295783727e1573e7c283e09ef398ca64b799
+      RELEASE_TAG: v1.3.1
+      RELEASE_TITLE: EZ记账 v1.3.1
+
+    steps:
+      - name: Checkout main source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Validate signing secrets
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+
+      - name: Restore signing keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/ez-accounting-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      - name: Verify fixed keystore certificate
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          ACTUAL="$(keytool -list -v -keystore "$ANDROID_KEYSTORE_PATH" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" \
+            | awk -F'SHA256: ' '/SHA256:/{print $2; exit}' \
+            | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          test "$ACTUAL" = "$EXPECTED_CERT_SHA256"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Run unit tests
+        run: gradle --no-daemon :app:testDebugUnitTest
+
+      - name: Build fixed-signature release APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon :app:assembleRelease
+
+      - name: Verify APK signature and prepare release assets
+        shell: bash
+        run: |
+          mkdir -p dist
+          APK='app/build/outputs/apk/release/app-release.apk'
+          OUTPUT='dist/EZ记账-v1.3.1.apk'
+          CERT_INFO='dist/EZ记账-v1.3.1-签名信息.txt'
+          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
+          test -f "$APK"
+          test -x "$APKSIGNER"
+          cp "$APK" "$OUTPUT"
+          "$APKSIGNER" verify "$OUTPUT"
+          "$APKSIGNER" verify --verbose --print-certs "$OUTPUT" > "$CERT_INFO" 2>&1
+          sha256sum "$OUTPUT" > "$OUTPUT.sha256"
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## EZ记账 v1.3.1
+
+          ### 修复
+
+          - 修复指纹或面容连续识别失败后，系统生物识别被临时或永久锁定时，页面只显示错误文字、无法继续操作的问题。
+          - 生物识别模式现在支持使用手机锁屏 PIN、图形或密码作为系统级备用验证。
+          - 生物识别锁定或硬件暂时不可用时，提供“重新验证（可用手机锁屏密码）”和“退出应用”入口。
+          - 保留原有应用 PIN、九宫格图形锁、自动锁定策略和安全限速功能。
+
+          ### 安装
+
+          与 v1.3.0 使用相同固定签名，可以直接覆盖安装。
+
+          固定签名证书 SHA-256：
+
+          `d29d3f581d1a90b12a067317c6f7295783727e1573e7c283e09ef398ca64b799`
+          EOF
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EZ记账-v1.3.1-release
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TITLE" --notes-file release-notes.md --latest
+          else
+            gh release create "$RELEASE_TAG" dist/* --target main --title "$RELEASE_TITLE" --notes-file release-notes.md --latest
+          fi
