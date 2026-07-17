@@ -50,7 +50,22 @@ jobs:
           gradle-version: '8.9'
 
       - name: Run unit tests and build debug APK
-        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug > gradle-build.log 2>&1
+          STATUS=$?
+          tail -n 160 gradle-build.log
+          exit $STATUS
+
+      - name: Upload Gradle log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: v1.4.0-gradle-log
+          path: gradle-build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Validate signing secrets
         if: ${{ github.event_name == 'pull_request' }}
