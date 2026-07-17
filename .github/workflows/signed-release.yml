@@ -60,6 +60,9 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Run unit tests
+        run: gradle --no-daemon :app:testDebugUnitTest
+
       - name: Build signed release APK
         shell: bash
         env:
@@ -73,7 +76,7 @@ jobs:
         run: |
           mkdir -p dist
           APK='app/build/outputs/apk/release/app-release.apk'
-          OUTPUT='dist/EZ记账-v1.2.1-signed.apk'
+          OUTPUT='dist/EZ记账-v1.3.0-signed.apk'
           APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
           test -x "$APKSIGNER" || { echo "apksigner not found: $APKSIGNER"; exit 1; }
           cp "$APK" "$OUTPUT"
@@ -91,7 +94,7 @@ jobs:
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: EZ记账-Signed-Release-v1.2.1
+          name: EZ记账-Signed-Release-v1.3.0
           path: dist/*
           if-no-files-found: error
           retention-days: 90
