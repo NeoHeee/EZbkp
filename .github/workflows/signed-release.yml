@@ -5,6 +5,10 @@ on:
   push:
     tags:
       - 'v*'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/signing-trigger'
 
 permissions:
   contents: read
