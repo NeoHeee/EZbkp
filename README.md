@@ -47,18 +47,15 @@
 
 ## 自动构建
 
-每次向 `main` 分支提交代码，GitHub Actions 都会构建 APK。构建完成后可在对应的 Actions 运行页面下载 `EZ记账-Android` 构建产物。
+仓库包含两条 Android 工作流：
 
-本地构建需要 Java 17、Android SDK 35 和 Gradle 8.9：
+- **Android CI**：在提交和 PR 时构建 Debug APK，用于开发测试。
+- **Signed Android Release**：通过手动运行或推送 `v*` 标签，使用固定签名证书构建正式 Release APK。
+
+本地调试构建需要 Java 17、Android SDK 35 和 Gradle 8.9：
 
 ```bash
 gradle --no-daemon :app:assembleDebug
-```
-
-APK 输出位置：
-
-```text
-app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ## 项目信息
@@ -69,9 +66,19 @@ app/build/outputs/apk/debug/app-debug.apk
 - 最低 Android：8.0（API 26）
 - 目标 Android：API 35
 
-## 签名说明
+## 固定签名
 
-当前 CI 默认生成调试签名 APK。正式长期发布前，建议在 GitHub Secrets 中配置固定签名证书，确保后续版本可以直接覆盖升级。
+Release 构建已强制使用固定签名证书。缺少签名变量时，Gradle 会中止 Release 构建，避免误发布不同证书签名的 APK。
+
+固定签名证书 SHA-256 指纹：
+
+```text
+D2:9D:3F:58:1D:1A:90:B1:2A:06:73:17:C6:F7:29:57:83:72:7E:15:73:E7:C2:83:E0:9E:F3:98:CA:64:B7:99
+```
+
+GitHub Secrets 配置和正式构建方式见 [SIGNING_SETUP.md](SIGNING_SETUP.md)。
+
+> 旧测试版 APK 使用 Debug 签名，首次安装固定签名版时需要卸载旧测试版。从固定签名版开始，后续版本可在版本号递增后直接覆盖升级。
 
 ## 隐私
 
