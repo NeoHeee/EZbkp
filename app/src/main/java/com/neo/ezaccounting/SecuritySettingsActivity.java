@@ -30,13 +30,14 @@ public class SecuritySettingsActivity extends FragmentActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        UiTheme.applySystemBars(this);
         showSettings();
     }
 
     private void showSettings() {
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
-        scrollView.setBackgroundColor(Color.rgb(245, 248, 248));
+        scrollView.setBackgroundColor(UiTheme.background(this));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -47,23 +48,23 @@ public class SecuritySettingsActivity extends FragmentActivity {
         TextView title = new TextView(this);
         title.setText("进入 App 的安全验证");
         title.setTextSize(24);
-        title.setTextColor(Color.rgb(20, 35, 35));
+        title.setTextColor(UiTheme.primaryText(this));
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         root.addView(title, fullWrap(dp(8)));
 
         TextView description = new TextView(this);
         description.setText("选择进入 EZ记账 时使用的验证方式，并设置从后台返回或熄屏后的自动锁定策略。");
         description.setTextSize(14.5f);
-        description.setTextColor(Color.rgb(80, 95, 95));
+        description.setTextColor(UiTheme.secondaryText(this));
         description.setLineSpacing(0, 1.15f);
         root.addView(description, fullWrap(dp(18)));
 
         currentMode = new TextView(this);
         currentMode.setTextSize(15);
-        currentMode.setTextColor(Color.rgb(26, 51, 51));
+        currentMode.setTextColor(UiTheme.primaryText(this));
         currentMode.setTypeface(null, android.graphics.Typeface.BOLD);
         currentMode.setPadding(dp(16), dp(14), dp(16), dp(14));
-        currentMode.setBackground(roundedBox(Color.WHITE, Color.rgb(196, 210, 208), 14));
+        currentMode.setBackground(roundedBox(UiTheme.surface(this), UiTheme.border(this), 14));
         root.addView(currentMode, fullWrap(dp(18)));
 
         relockButton = optionButton("自动锁定时间", "设置 App 切到后台后多长时间重新验证");
@@ -96,7 +97,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
         TextView note = new TextView(this);
         note.setText("提示：连续输错 PIN 或图形后会进入递增等待时间。若选择生物识别，请确保系统中已录入指纹或面容。");
         note.setTextSize(12.5f);
-        note.setTextColor(Color.rgb(105, 120, 120));
+        note.setTextColor(UiTheme.tertiaryText(this));
         note.setLineSpacing(0, 1.12f);
         root.addView(note, fullWrap(0));
 
@@ -108,7 +109,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
         TextView title = new TextView(this);
         title.setText(text);
         title.setTextSize(17);
-        title.setTextColor(Color.rgb(20, 45, 45));
+        title.setTextColor(UiTheme.primaryText(this));
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         return title;
     }
@@ -119,9 +120,9 @@ public class SecuritySettingsActivity extends FragmentActivity {
         button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         button.setText(title + "\n" + subtitle);
         button.setTextSize(15);
-        button.setTextColor(Color.rgb(25, 50, 50));
+        button.setTextColor(UiTheme.primaryText(this));
         button.setPadding(dp(16), dp(12), dp(16), dp(12));
-        button.setBackground(roundedBox(Color.WHITE, Color.rgb(205, 218, 216), 14));
+        button.setBackground(roundedBox(UiTheme.surface(this), UiTheme.border(this), 14));
         button.setMinHeight(dp(72));
         return button;
     }
@@ -228,7 +229,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
         input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4)});
         input.setPadding(dp(14), dp(12), dp(14), dp(12));
-        input.setBackground(roundedBox(Color.WHITE, Color.rgb(196, 210, 208), 12));
+        input.setBackground(roundedBox(UiTheme.surface(this), UiTheme.border(this), 12));
         return input;
     }
 
@@ -239,7 +240,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
         TextView instruction = new TextView(this);
         instruction.setText("绘制新图形，至少连接四个点");
         instruction.setTextSize(15);
-        instruction.setTextColor(Color.rgb(50, 70, 70));
+        instruction.setTextColor(UiTheme.secondaryText(this));
         instruction.setGravity(Gravity.CENTER);
         content.addView(instruction, fullWrap(dp(8)));
         PatternLockView patternView = new PatternLockView(this);
