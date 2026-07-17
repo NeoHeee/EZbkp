@@ -5,6 +5,8 @@ import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputFilter;
 import android.text.InputType;
 import android.view.Gravity;
@@ -24,9 +26,20 @@ import androidx.fragment.app.FragmentActivity;
 public class LockActivity extends FragmentActivity {
     public static final String EXTRA_REASON = "reason";
 
+    private final Handler lockoutHandler = new Handler(Looper.getMainLooper());
     private LinearLayout root;
     private TextView message;
-    private int failedAttempts;
+    private EditText pinInput;
+    private Button unlockButton;
+    private PatternLockView patternView;
+    private String normalPrompt = "请完成安全验证";
+
+    private final Runnable lockoutTick = new Runnable() {
+        @Override
+        public void run() {
+            refreshLockoutState();
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -75,7 +88,7 @@ public class LockActivity extends FragmentActivity {
 
         message = new TextView(this);
         String reason = getIntent().getStringExtra(EXTRA_REASON);
-        message.setText(reason == null || reason.trim().isEmpty() ? "请完成安全验证" : reason);
+        message.setText(reason == null || reason.trim().isEmpty() ? normalPrompt : reason);
         message.setTextSize(14.5f);
         message.setTextColor(Color.rgb(90, 105, 105));
         message.setGravity(Gravity.CENTER);
@@ -84,8 +97,9 @@ public class LockActivity extends FragmentActivity {
     }
 
     private void showPinLock() {
-        message.setText("请输入四位数字密码");
-        EditText pinInput = new EditText(this);
+        normalPrompt = "请输入四位数字密码";
+        message.setText(normalPrompt);
+        pinInput = new EditText(this);
         pinInput.setSingleLine(true);
         pinInput.setGravity(Gravity.CENTER);
         pinInput.setTextSize(25);
@@ -96,30 +110,41 @@ public class LockActivity extends FragmentActivity {
         pinInput.setBackground(roundedBox(Color.WHITE, Color.rgb(196, 210, 208), 14));
         root.addView(pinInput, fullWrap(dp(16)));
 
-        Button unlock = primaryButton("解锁");
-        root.addView(unlock, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
-        unlock.setOnClickListener(v -> {
-            String pin = pinInput.getText().toString();
-            if (pin.length() != 4) { pinInput.setError("请输入四位数字密码"); return; }
-            if (AppSecurity.verifySecret(this, pin)) {
-                unlockSuccess();
-            } else {
-                failedAttempts++;
-                pinInput.setText("");
-                message.setText(failedAttempts >= 3 ? "密码错误，请确认后重试" : "密码错误");
-                pinInput.requestFocus();
-            }
-        });
+        unlockButton = primaryButton("解锁");
+        root.addView(unlockButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+        unlockButton.setOnClickListener(v -> verifyPin());
+
         pinInput.requestFocus();
         pinInput.postDelayed(() -> {
+            if (!pinInput.isEnabled()) return;
             InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
             imm.showSoftInput(pinInput, InputMethodManager.SHOW_IMPLICIT);
         }, 250);
+        refreshLockoutState();
+    }
+
+    private void verifyPin() {
+        if (AppSecurity.getRemainingLockoutMs(this) > 0) {
+            refreshLockoutState();
+            return;
+        }
+        String pin = pinInput.getText().toString();
+        if (pin.length() != 4) { pinInput.setError("请输入四位数字密码"); return; }
+        if (AppSecurity.verifySecret(this, pin)) {
+            unlockSuccess();
+            return;
+        }
+        pinInput.setText("");
+        long delay = AppSecurity.recordFailedAttempt(this);
+        if (delay > 0) refreshLockoutState();
+        else message.setText("密码错误");
+        pinInput.requestFocus();
     }
 
     private void showPatternLock() {
-        message.setText("请绘制九宫格图形");
-        PatternLockView patternView = new PatternLockView(this);
+        normalPrompt = "请绘制九宫格图形";
+        message.setText(normalPrompt);
+        patternView = new PatternLockView(this);
         LinearLayout.LayoutParams patternParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
         patternParams.bottomMargin = dp(10);
@@ -133,18 +158,44 @@ public class LockActivity extends FragmentActivity {
         root.addView(hint, fullWrap(dp(6)));
 
         patternView.setListener(pattern -> {
+            if (AppSecurity.getRemainingLockoutMs(this) > 0) {
+                patternView.clearPattern();
+                refreshLockoutState();
+                return;
+            }
             if (AppSecurity.verifySecret(this, pattern)) {
                 unlockSuccess();
-            } else {
-                failedAttempts++;
-                message.setText(failedAttempts >= 3 ? "图形错误，请确认后重试" : "图形错误");
-                patternView.postDelayed(patternView::clearPattern, 450);
+                return;
             }
+            long delay = AppSecurity.recordFailedAttempt(this);
+            if (delay > 0) refreshLockoutState();
+            else message.setText("图形错误");
+            patternView.postDelayed(patternView::clearPattern, 450);
         });
+        refreshLockoutState();
+    }
+
+    private void refreshLockoutState() {
+        lockoutHandler.removeCallbacks(lockoutTick);
+        long remaining = AppSecurity.getRemainingLockoutMs(this);
+        boolean lockedOut = remaining > 0;
+        if (pinInput != null) pinInput.setEnabled(!lockedOut);
+        if (unlockButton != null) unlockButton.setEnabled(!lockedOut);
+        if (patternView != null) patternView.setEnabled(!lockedOut);
+
+        if (!lockedOut) {
+            message.setText(normalPrompt);
+            return;
+        }
+
+        long seconds = Math.max(1L, (remaining + 999L) / 1000L);
+        message.setText("尝试次数过多，请在 " + seconds + " 秒后重试");
+        lockoutHandler.postDelayed(lockoutTick, Math.min(1000L, remaining));
     }
 
     private void showBiometricLock() {
-        message.setText("请使用系统生物识别验证");
+        normalPrompt = "请使用系统生物识别验证";
+        message.setText(normalPrompt);
         int authenticators = BiometricManager.Authenticators.BIOMETRIC_WEAK;
         int availability = BiometricManager.from(this).canAuthenticate(authenticators);
         if (availability != BiometricManager.BIOMETRIC_SUCCESS) {
@@ -159,12 +210,16 @@ public class LockActivity extends FragmentActivity {
                 new BiometricPrompt.AuthenticationCallback() {
                     @Override
                     public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
-                        super.onAuthenticationSucceeded(result); unlockSuccess();
+                        super.onAuthenticationSucceeded(result);
+                        unlockSuccess();
                     }
+
                     @Override
                     public void onAuthenticationFailed() {
-                        super.onAuthenticationFailed(); message.setText("未识别，请重试");
+                        super.onAuthenticationFailed();
+                        message.setText("未识别，请重试");
                     }
+
                     @Override
                     public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
                         super.onAuthenticationError(errorCode, errString);
@@ -214,11 +269,25 @@ public class LockActivity extends FragmentActivity {
         return params;
     }
 
-    private void unlockSuccess() { setResult(Activity.RESULT_OK); finish(); }
-    private void finishCanceled() { setResult(Activity.RESULT_CANCELED); finish(); }
+    private void unlockSuccess() {
+        AppSecurity.resetFailedAttempts(this);
+        setResult(Activity.RESULT_OK);
+        finish();
+    }
+
+    private void finishCanceled() {
+        setResult(Activity.RESULT_CANCELED);
+        finish();
+    }
 
     @Override
     public void onBackPressed() { finishCanceled(); }
+
+    @Override
+    protected void onDestroy() {
+        lockoutHandler.removeCallbacksAndMessages(null);
+        super.onDestroy();
+    }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 }
