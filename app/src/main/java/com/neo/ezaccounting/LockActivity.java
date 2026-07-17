@@ -1,15 +1,18 @@
 package com.neo.ezaccounting;
 
 import android.app.Activity;
+import android.app.KeyguardManager;
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputFilter;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
@@ -32,6 +35,9 @@ public class LockActivity extends FragmentActivity {
     private EditText pinInput;
     private Button unlockButton;
     private PatternLockView patternView;
+    private Button biometricRetryButton;
+    private Button biometricExitButton;
+    private BiometricPrompt biometricPrompt;
     private String normalPrompt = "请完成安全验证";
 
     private final Runnable lockoutTick = new Runnable() {
@@ -194,19 +200,19 @@ public class LockActivity extends FragmentActivity {
     }
 
     private void showBiometricLock() {
-        normalPrompt = "请使用系统生物识别验证";
+        normalPrompt = "请使用指纹、面容或手机锁屏密码验证";
         message.setText(normalPrompt);
-        int authenticators = BiometricManager.Authenticators.BIOMETRIC_WEAK;
-        int availability = BiometricManager.from(this).canAuthenticate(authenticators);
-        if (availability != BiometricManager.BIOMETRIC_SUCCESS) {
-            message.setText("设备当前无法使用生物识别，请先在系统设置中录入指纹或面容");
-            Button close = primaryButton("关闭");
-            root.addView(close, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
-            close.setOnClickListener(v -> finishCanceled());
+
+        int biometricAvailability = BiometricManager.from(this)
+                .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK);
+        if (biometricAvailability != BiometricManager.BIOMETRIC_SUCCESS &&
+                !isDeviceCredentialAvailable()) {
+            message.setText("设备当前没有可用的生物识别或手机锁屏密码");
+            addBiometricExitButton();
             return;
         }
 
-        BiometricPrompt prompt = new BiometricPrompt(this, ContextCompat.getMainExecutor(this),
+        biometricPrompt = new BiometricPrompt(this, ContextCompat.getMainExecutor(this),
                 new BiometricPrompt.AuthenticationCallback() {
                     @Override
                     public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
@@ -217,7 +223,7 @@ public class LockActivity extends FragmentActivity {
                     @Override
                     public void onAuthenticationFailed() {
                         super.onAuthenticationFailed();
-                        message.setText("未识别，请重试");
+                        message.setText("未识别，可重试或改用手机锁屏密码");
                     }
 
                     @Override
@@ -225,19 +231,96 @@ public class LockActivity extends FragmentActivity {
                         super.onAuthenticationError(errorCode, errString);
                         if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON ||
                                 errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
-                                errorCode == BiometricPrompt.ERROR_CANCELED) finishCanceled();
-                        else message.setText(errString);
+                                errorCode == BiometricPrompt.ERROR_CANCELED) {
+                            finishCanceled();
+                            return;
+                        }
+
+                        if (errorCode == BiometricPrompt.ERROR_LOCKOUT) {
+                            showBiometricRecovery(
+                                    "指纹暂时被系统锁定。可使用手机锁屏密码验证，或稍后重新尝试指纹。");
+                            return;
+                        }
+
+                        if (errorCode == BiometricPrompt.ERROR_LOCKOUT_PERMANENT) {
+                            showBiometricRecovery(
+                                    "指纹已被系统锁定。请使用手机锁屏密码完成一次验证后再使用指纹。");
+                            return;
+                        }
+
+                        if (errorCode == BiometricPrompt.ERROR_HW_UNAVAILABLE) {
+                            showBiometricRecovery("生物识别硬件暂时不可用，可改用手机锁屏密码验证。");
+                            return;
+                        }
+
+                        showBiometricRecovery(errString.toString());
                     }
                 });
 
-        BiometricPrompt.PromptInfo info = new BiometricPrompt.PromptInfo.Builder()
+        authenticateBiometricOrDeviceCredential();
+    }
+
+    @SuppressWarnings("deprecation")
+    private void authenticateBiometricOrDeviceCredential() {
+        clearBiometricRecovery();
+        message.setText(normalPrompt);
+
+        BiometricPrompt.PromptInfo.Builder builder = new BiometricPrompt.PromptInfo.Builder()
                 .setTitle("解锁 EZ记账")
-                .setSubtitle("验证身份后进入应用")
-                .setAllowedAuthenticators(authenticators)
-                .setNegativeButtonText("取消")
-                .setConfirmationRequired(false)
-                .build();
-        prompt.authenticate(info);
+                .setSubtitle("使用指纹、面容或手机锁屏密码")
+                .setConfirmationRequired(false);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            builder.setAllowedAuthenticators(
+                    BiometricManager.Authenticators.BIOMETRIC_WEAK |
+                            BiometricManager.Authenticators.DEVICE_CREDENTIAL);
+        } else {
+            builder.setDeviceCredentialAllowed(true);
+        }
+
+        try {
+            biometricPrompt.authenticate(builder.build());
+        } catch (IllegalArgumentException error) {
+            showBiometricRecovery("系统验证组件暂时不可用，请返回后重试。");
+        }
+    }
+
+    private boolean isDeviceCredentialAvailable() {
+        KeyguardManager keyguardManager =
+                (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+        return keyguardManager != null && keyguardManager.isDeviceSecure();
+    }
+
+    private void showBiometricRecovery(String text) {
+        message.setText(text);
+        if (biometricRetryButton == null) {
+            biometricRetryButton = primaryButton("重新验证（可用手机锁屏密码）");
+            root.addView(biometricRetryButton,
+                    new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+            biometricRetryButton.setOnClickListener(v -> authenticateBiometricOrDeviceCredential());
+        } else {
+            biometricRetryButton.setVisibility(View.VISIBLE);
+            biometricRetryButton.setEnabled(true);
+        }
+        addBiometricExitButton();
+    }
+
+    private void addBiometricExitButton() {
+        if (biometricExitButton == null) {
+            biometricExitButton = secondaryButton("退出应用");
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
+            params.topMargin = dp(12);
+            root.addView(biometricExitButton, params);
+            biometricExitButton.setOnClickListener(v -> finishCanceled());
+        } else {
+            biometricExitButton.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void clearBiometricRecovery() {
+        if (biometricRetryButton != null) biometricRetryButton.setVisibility(View.GONE);
+        if (biometricExitButton != null) biometricExitButton.setVisibility(View.GONE);
     }
 
     private Button primaryButton(String text) {
@@ -251,6 +334,16 @@ public class LockActivity extends FragmentActivity {
                 new int[]{Color.rgb(15, 118, 110), Color.rgb(13, 148, 136)});
         background.setCornerRadius(dp(14));
         button.setBackground(background);
+        return button;
+    }
+
+    private Button secondaryButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setTextSize(15);
+        button.setTextColor(Color.rgb(45, 70, 70));
+        button.setAllCaps(false);
+        button.setBackground(roundedBox(Color.WHITE, Color.rgb(196, 210, 208), 14));
         return button;
     }
 
