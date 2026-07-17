@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.EZAccounting" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">false</item>
+        <item name="android:windowBackground">#101617</item>
+        <item name="android:statusBarColor">#101617</item>
+        <item name="android:navigationBarColor">#101617</item>
+        <item name="android:colorAccent">@color/ez_accent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+</resources>
