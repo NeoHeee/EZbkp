@@ -76,7 +76,7 @@ gradle --no-daemon :app:assembleDebug
 
 - 应用名称：EZ记账
 - 包名：`com.neo.ezaccounting`
-- 当前版本：`1.2.0`
+- 当前版本：`1.2.1`
 - 最低 Android：8.0（API 26）
 - 目标 Android：API 35
 
