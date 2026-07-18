@@ -34,10 +34,12 @@ public class AppStateMachineTest {
         assertFalse(machine.transitionTo(AppStateMachine.State.ERROR));
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void rejectsSkippingFromInitializingDirectlyToReady() {
+    @Test
+    public void unexpectedLifecycleOrderRecoversWithoutCrash() {
         AppStateMachine machine = new AppStateMachine(AppStateMachine.State.INITIALIZING);
-        machine.transitionTo(AppStateMachine.State.READY);
+        assertTrue(machine.transitionTo(AppStateMachine.State.READY));
+        assertEquals(AppStateMachine.State.READY, machine.getState());
+        assertEquals("INITIALIZING -> READY", machine.getLastUnexpectedTransition());
     }
 
     @Test
