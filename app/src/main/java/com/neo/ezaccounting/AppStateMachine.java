@@ -19,6 +19,7 @@ public final class AppStateMachine {
 
     private State state;
     private Listener listener;
+    private String lastUnexpectedTransition;
 
     public AppStateMachine(State initialState) {
         state = initialState == null ? State.INITIALIZING : initialState;
@@ -26,12 +27,21 @@ public final class AppStateMachine {
 
     public State getState() { return state; }
     public void setListener(Listener listener) { this.listener = listener; }
+    public String getLastUnexpectedTransition() { return lastUnexpectedTransition; }
 
     public boolean transitionTo(State next) {
         if (next == null || next == state) return false;
         if (!canTransition(state, next)) {
-            throw new IllegalStateException("Invalid state transition: " + state + " -> " + next);
+            lastUnexpectedTransition = state + " -> " + next;
         }
+        return apply(next);
+    }
+
+    public boolean transitionSafely(State next) {
+        return transitionTo(next);
+    }
+
+    private boolean apply(State next) {
         State previous = state;
         state = next;
         if (listener != null) listener.onStateChanged(previous, next);

@@ -7,40 +7,23 @@ def releaseKeystorePassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
 def releaseKeyAlias = System.getenv('ANDROID_KEY_ALIAS')
 def releaseKeyPassword = System.getenv('ANDROID_KEY_PASSWORD')
 
-def hasReleaseSigning = [
-        releaseKeystorePath,
-        releaseKeystorePassword,
-        releaseKeyAlias,
-        releaseKeyPassword
-].every { value -> value != null && !value.trim().isEmpty() }
-
-def releaseTaskRequested = gradle.startParameter.taskNames.any {
-    it.toLowerCase().contains('release')
-}
-
+def hasReleaseSigning = [releaseKeystorePath, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword].every { value -> value != null && !value.trim().isEmpty() }
+def releaseTaskRequested = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
 if (releaseTaskRequested && !hasReleaseSigning) {
-    throw new GradleException(
-            'Release signing is not configured. Set ANDROID_KEYSTORE_PATH, ' +
-                    'ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD.'
-    )
+    throw new GradleException('Release signing is not configured.')
 }
 
 android {
     namespace 'com.neo.ezaccounting'
     compileSdk 35
-
     defaultConfig {
         applicationId 'com.neo.ezaccounting'
         minSdk 26
         targetSdk 35
-        versionCode 8
-        versionName '1.5.0'
+        versionCode 9
+        versionName '1.5.1'
     }
-
-    buildFeatures {
-        buildConfig true
-    }
-
+    buildFeatures { buildConfig true }
     signingConfigs {
         release {
             if (hasReleaseSigning) {
@@ -55,17 +38,13 @@ android {
             }
         }
     }
-
     buildTypes {
         release {
-            if (hasReleaseSigning) {
-                signingConfig signingConfigs.release
-            }
+            if (hasReleaseSigning) { signingConfig signingConfigs.release }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
-
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -73,8 +52,10 @@ android {
 }
 
 dependencies {
-    implementation "androidx.activity:activity:1.2.4"
-    implementation "androidx.swiperefreshlayout:swiperefreshlayout:1.1.0"
-    implementation "androidx.biometric:biometric:1.1.0"
-    testImplementation "junit:junit:4.13.2"
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.20')
+    implementation 'androidx.activity:activity:1.7.2'
+    implementation 'androidx.fragment:fragment:1.6.2'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    implementation 'androidx.biometric:biometric:1.1.0'
+    testImplementation 'junit:junit:4.13.2'
 }
