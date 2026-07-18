@@ -32,6 +32,15 @@ public final class AppStateMachine {
         if (!canTransition(state, next)) {
             throw new IllegalStateException("Invalid state transition: " + state + " -> " + next);
         }
+        return apply(next);
+    }
+
+    public boolean transitionSafely(State next) {
+        if (next == null || next == state) return false;
+        return apply(next);
+    }
+
+    private boolean apply(State next) {
         State previous = state;
         state = next;
         if (listener != null) listener.onStateChanged(previous, next);
