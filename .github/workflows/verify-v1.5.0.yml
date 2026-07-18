@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - feature/stable-core-v1.5.0
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/verify-v1.5.0.yml'
+      - 'app/**'
   workflow_dispatch:
 
 permissions:
@@ -29,8 +35,23 @@ jobs:
         with:
           gradle-version: '8.9'
       - name: Run lifecycle tests and build debug APK
-        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug > v150-build.log 2>&1
+          STATUS=$?
+          tail -n 180 v150-build.log
+          exit $STATUS
+      - name: Upload full build log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: v1.5.0-build-log
+          path: v150-build.log
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Upload debug APK
+        if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
           name: EZ记账-v1.5.0-debug-verify
