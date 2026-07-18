@@ -21,6 +21,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.util.Arrays;
 import java.util.List;
@@ -121,10 +122,17 @@ public final class QuickActionsSheet {
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(0, dp(activity, 4), 0, dp(activity, 4));
 
-        addSectionHeading(activity, content, "常用操作", "高频访问与安全控制");
+        addSectionHeading(activity, content, "常用操作", "页面、线路与安全控制");
         addTileGrid(activity, content, Arrays.asList(
                 new ActionItem(android.R.drawable.ic_menu_view,
                         "回到首页", "返回记账主页面", listener::onHome),
+                new ActionItem(android.R.drawable.ic_popup_sync,
+                        "刷新当前页面", "重新加载正在查看的网页", () -> {
+                            boolean refreshed = WebViewController.reloadActive();
+                            Toast.makeText(activity,
+                                    refreshed ? "正在刷新当前页面" : "当前页面尚未加载",
+                                    Toast.LENGTH_SHORT).show();
+                        }),
                 new ActionItem(android.R.drawable.ic_menu_info_details,
                         "线路状态", "查看延迟与可用性", listener::onRouteStatus),
                 new ActionItem(android.R.drawable.ic_menu_rotate,
@@ -191,7 +199,7 @@ public final class QuickActionsSheet {
         texts.setOrientation(LinearLayout.VERTICAL);
         TextView title = text(context, "快捷中心", 22, UiTheme.primaryText(context));
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        TextView subtitle = text(context, "线路、安全与维护工具", 13,
+        TextView subtitle = text(context, "页面、线路、安全与维护工具", 13,
                 UiTheme.secondaryText(context));
         subtitle.setPadding(0, dp(context, 3), 0, 0);
         texts.addView(title);
@@ -222,15 +230,19 @@ public final class QuickActionsSheet {
         LinearLayout firstRow = new LinearLayout(context);
         firstRow.setOrientation(LinearLayout.HORIZONTAL);
         firstRow.setPadding(0, dp(context, 9), 0, 0);
-        firstRow.addView(statusCell(context, "线路模式", model.mode), weightedCellParams(context, true));
-        firstRow.addView(statusCell(context, "当前线路", model.route), weightedCellParams(context, false));
+        firstRow.addView(statusCell(context, "线路模式", model.mode),
+                weightedCellParams(context, true));
+        firstRow.addView(statusCell(context, "当前线路", model.route),
+                weightedCellParams(context, false));
         panel.addView(firstRow);
 
         LinearLayout secondRow = new LinearLayout(context);
         secondRow.setOrientation(LinearLayout.HORIZONTAL);
         secondRow.setPadding(0, dp(context, 8), 0, 0);
-        secondRow.addView(statusCell(context, "最近延迟", model.latency), weightedCellParams(context, true));
-        secondRow.addView(statusCell(context, "安全保护", model.security), weightedCellParams(context, false));
+        secondRow.addView(statusCell(context, "最近延迟", model.latency),
+                weightedCellParams(context, true));
+        secondRow.addView(statusCell(context, "安全保护", model.security),
+                weightedCellParams(context, false));
         panel.addView(secondRow);
 
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
@@ -285,15 +297,13 @@ public final class QuickActionsSheet {
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.TOP);
 
-            ActionItem first = items.get(index);
-            row.addView(createTile(context, first, dialog), tileParams(context, true));
-
-            if (index + 1 < items.size()) {
-                ActionItem second = items.get(index + 1);
-                row.addView(createTile(context, second, dialog), tileParams(context, false));
+            if (index + 1 >= items.size()) {
+                row.addView(createTile(context, items.get(index), dialog), fullTileParams());
             } else {
-                View spacer = new View(context);
-                row.addView(spacer, tileParams(context, false));
+                row.addView(createTile(context, items.get(index), dialog),
+                        tileParams(context, true));
+                row.addView(createTile(context, items.get(index + 1), dialog),
+                        tileParams(context, false));
             }
 
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
@@ -309,6 +319,11 @@ public final class QuickActionsSheet {
         if (first) params.rightMargin = dp(context, 4);
         else params.leftMargin = dp(context, 4);
         return params;
+    }
+
+    private static LinearLayout.LayoutParams fullTileParams() {
+        return new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     private static View createTile(Context context, ActionItem item, Dialog dialog) {
