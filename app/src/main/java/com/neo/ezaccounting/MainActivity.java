@@ -192,7 +192,11 @@ public class MainActivity extends FragmentActivity implements
             pendingShortcutAction = null;
             showServerSettings();
         } else if (routeCoordinator.hasConfiguredRoute()) {
-            routeCoordinator.requestCheck(RouteCoordinator.Trigger.STARTUP);
+            if (routeCoordinator.activateFastStartRoute()) {
+                scheduleBackgroundStartupProbe();
+            } else {
+                routeCoordinator.requestCheck(RouteCoordinator.Trigger.STARTUP);
+            }
         } else {
             showServerSettings();
         }
@@ -201,6 +205,13 @@ public class MainActivity extends FragmentActivity implements
             handlePendingShortcutAction();
             scheduleAutomaticUpdateCheck();
         });
+    }
+
+    private void scheduleBackgroundStartupProbe() {
+        getWindow().getDecorView().postDelayed(() -> {
+            if (isFinishing() || isDestroyed() || serverSettingsVisible) return;
+            routeCoordinator.requestCheck(RouteCoordinator.Trigger.BACKGROUND_STARTUP);
+        }, 300L);
     }
 
     private void handlePendingShortcutAction() {
@@ -300,6 +311,7 @@ public class MainActivity extends FragmentActivity implements
 
     @Override
     public void onRouteCheckStarted(RouteCoordinator.Trigger trigger) {
+        if (trigger == RouteCoordinator.Trigger.BACKGROUND_STARTUP) return;
         if (trigger == RouteCoordinator.Trigger.MANUAL_SPEED_TEST) {
             Toast.makeText(this, "正在手动测速…", Toast.LENGTH_SHORT).show();
             return;
@@ -344,7 +356,8 @@ public class MainActivity extends FragmentActivity implements
             webViewController.reload();
         }
 
-        if (changed && trigger != RouteCoordinator.Trigger.STARTUP) {
+        if (changed && trigger != RouteCoordinator.Trigger.STARTUP &&
+                trigger != RouteCoordinator.Trigger.FAST_START) {
             Toast.makeText(this, "已切换到" + routeName(target.type) +
                     "（" + target.latencyMs + " ms）", Toast.LENGTH_SHORT).show();
         }
@@ -379,6 +392,11 @@ public class MainActivity extends FragmentActivity implements
     public void onRouteUnavailable(RouteCoordinator.Snapshot snapshot, String reason,
                                    RouteCoordinator.Trigger trigger) {
         if (serverSettingsVisible) return;
+        if (trigger == RouteCoordinator.Trigger.BACKGROUND_STARTUP &&
+                webViewController.isCreated() &&
+                stateMachine.getState() != AppStateMachine.State.ERROR) {
+            return;
+        }
         showErrorPage(reason, lastFailure, snapshot);
     }
 

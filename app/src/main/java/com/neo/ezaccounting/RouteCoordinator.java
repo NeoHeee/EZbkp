@@ -14,6 +14,8 @@ public final class RouteCoordinator {
 
     public enum Trigger {
         STARTUP,
+        FAST_START,
+        BACKGROUND_STARTUP,
         NETWORK_CHANGE,
         PAGE_FAILURE,
         RETRY,
@@ -96,6 +98,31 @@ public final class RouteCoordinator {
 
     public boolean hasConfiguredRoute() {
         return !localUrl.isEmpty() || !publicUrl.isEmpty();
+    }
+
+    public boolean activateFastStartRoute() {
+        FastStartPolicy.Candidate candidate = FastStartPolicy.select(getMode(), localUrl,
+                publicUrl, preferences.getString(KEY_LAST_ROUTE, ""));
+        if (candidate == null) return false;
+
+        long latency = candidate.type == RouteManager.TYPE_LOCAL ?
+                preferences.getLong(KEY_LOCAL_LATENCY, -1L) :
+                preferences.getLong(KEY_PUBLIC_LATENCY, -1L);
+        RouteManager.ProbeResult target = new RouteManager.ProbeResult(candidate.url,
+                candidate.type, true, latency, 0, RouteManager.ErrorKind.NONE,
+                "使用缓存线路，后台测速中");
+        RouteManager.Selection selection = new RouteManager.Selection(target,
+                candidate.type == RouteManager.TYPE_LOCAL ? target : null,
+                candidate.type == RouteManager.TYPE_PUBLIC ? target : null);
+        Snapshot snapshot = new Snapshot(selection, getMode(), candidate.url, candidate.type,
+                System.currentTimeMillis());
+        activeUrl = candidate.url;
+        activeType = candidate.type;
+        lastSnapshot = snapshot;
+        preferences.edit().putString(KEY_LAST_ROUTE, activeUrl).apply();
+        switchPolicy.recordSuccess(activeType);
+        host.onRouteActivated(target, snapshot, true, candidate.reason, Trigger.FAST_START);
+        return true;
     }
 
     public RouteMode getMode() {
@@ -185,11 +212,14 @@ public final class RouteCoordinator {
                 return;
             }
 
+            boolean allowPerformanceSwitch = trigger != Trigger.BACKGROUND_STARTUP;
             RouteSwitchPolicy.Decision decision = switchPolicy.evaluate(activeType,
-                    selection, snapshot.checkedAt, true);
+                    selection, snapshot.checkedAt, allowPerformanceSwitch);
             if (decision.shouldSwitch && decision.target != null) {
                 activate(decision.target, snapshot, decision.reason, trigger);
             } else if (activeUrl != null && snapshot.activeReachable()) {
+                host.onRouteStable(snapshot, decision.reason, trigger);
+            } else if (trigger == Trigger.BACKGROUND_STARTUP && activeUrl != null) {
                 host.onRouteStable(snapshot, decision.reason, trigger);
             } else {
                 host.onRouteUnavailable(snapshot, decision.reason, trigger);
@@ -202,9 +232,13 @@ public final class RouteCoordinator {
         RouteManager.ProbeResult target = snapshot.selection == null ? null :
                 snapshot.selection.selected;
         if (target == null || !target.reachable) {
-            host.onRouteUnavailable(snapshot,
-                    snapshot.mode == RouteMode.LOCAL ? "固定的本地线路不可用" :
-                            "固定的公网线路不可用", trigger);
+            String reason = snapshot.mode == RouteMode.LOCAL ? "固定的本地线路不可用" :
+                    "固定的公网线路不可用";
+            if (trigger == Trigger.BACKGROUND_STARTUP && activeUrl != null) {
+                host.onRouteStable(snapshot, reason + "，等待页面加载结果", trigger);
+            } else {
+                host.onRouteUnavailable(snapshot, reason, trigger);
+            }
             return;
         }
         activate(target, snapshot, "按手动线路模式切换", trigger);
@@ -237,7 +271,8 @@ public final class RouteCoordinator {
         if (current == null) return next;
         if (next == Trigger.MANUAL_MODE_CHANGE || next == Trigger.RETRY ||
                 next == Trigger.MANUAL_SPEED_TEST) return next;
-        if (current == Trigger.NETWORK_CHANGE && next == Trigger.PAGE_FAILURE) return next;
+        if ((current == Trigger.NETWORK_CHANGE || current == Trigger.BACKGROUND_STARTUP) &&
+                next == Trigger.PAGE_FAILURE) return next;
         return current;
     }
 
