@@ -86,7 +86,7 @@ public final class ServerSettingsPage {
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 52)));
 
         TextView note = text(activity,
-                "进入记账界面后不会显示额外顶部栏。\n下拉页面可刷新；双指快速双击可打开隐藏菜单。\n" +
+                "进入记账界面后不会显示额外顶部栏。\n可在快捷中心刷新页面；双指快速双击可打开隐藏菜单。\n" +
                         "HTTPS证书无效时会阻止连接。地址和安全设置只保存在本机。",
                 12.5f, UiTheme.tertiaryText(activity), false);
         note.setGravity(Gravity.CENTER);
