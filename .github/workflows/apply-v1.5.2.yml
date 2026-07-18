@@ -4,10 +4,6 @@ on:
   push:
     branches:
       - fix/fast-start-v1.5.2
-  pull_request:
-    branches:
-      - main
-    types: [opened]
   workflow_dispatch:
 
 permissions:
@@ -15,14 +11,20 @@ permissions:
 
 jobs:
   integrate:
-    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[v1.5.2-applied]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[v1.5.2-applied]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fix/fast-start-v1.5.2
           fetch-depth: 0
-      - run: python3 scripts/apply_v1_5_2.py
+      - name: Apply source patch without changing protected workflows
+        run: |
+          cp .github/workflows/android.yml /tmp/android.yml
+          cp .github/workflows/signed-release.yml /tmp/signed-release.yml
+          python3 scripts/apply_v1_5_2.py
+          cp /tmp/android.yml .github/workflows/android.yml
+          cp /tmp/signed-release.yml .github/workflows/signed-release.yml
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
