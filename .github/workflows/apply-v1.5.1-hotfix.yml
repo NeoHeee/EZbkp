@@ -1,0 +1,135 @@
+name: Apply v1.5.1 Runtime Hotfix
+
+on:
+  push:
+    branches: [hotfix/v1.5.1]
+    paths:
+      - '.github/workflows/apply-v1.5.1-hotfix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hotfix/v1.5.1
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Apply runtime safeguards
+        shell: python
+        run: |
+          from pathlib import Path
+
+          main = Path('app/src/main/java/com/neo/ezaccounting/MainActivity.java')
+          text = main.read_text()
+          text = text.replace(
+              'if (stateMachine.getState() != next) stateMachine.transitionTo(next);',
+              'if (stateMachine.getState() != next) stateMachine.transitionSafely(next);'
+          )
+          text = text.replace(
+              '''    private void registerScreenOffReceiver() {
+                  if (screenReceiverRegistered) return;
+                  IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      registerReceiver(screenOffReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+                  } else {
+                      registerReceiver(screenOffReceiver, filter);
+                  }
+                  screenReceiverRegistered = true;
+              }''',
+              '''    private void registerScreenOffReceiver() {
+                  if (screenReceiverRegistered) return;
+                  try {
+                      IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                          registerReceiver(screenOffReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+                      } else {
+                          registerReceiver(screenOffReceiver, filter);
+                      }
+                      screenReceiverRegistered = true;
+                  } catch (RuntimeException ignored) {
+                      screenReceiverRegistered = false;
+                  }
+              }'''
+          )
+          text = text.replace(
+              '''        if (networkMonitor != null) networkMonitor.start();
+                  if (downloadController != null) downloadController.register();''',
+              '''        try { if (networkMonitor != null) networkMonitor.start(); } catch (RuntimeException ignored) {}
+                  try { if (downloadController != null) downloadController.register(); } catch (RuntimeException ignored) {}'''
+          )
+          main.write_text(text)
+
+          settings = Path('app/src/main/java/com/neo/ezaccounting/SecuritySettingsActivity.java')
+          text = settings.read_text()
+          text = text.replace(
+              '''        UiTheme.applySystemBars(this);
+                  showSettings();''',
+              '''        try {
+                      UiTheme.applySystemBars(this);
+                      showSettings();
+                  } catch (RuntimeException error) {
+                      showRecoveryPage();
+                  }'''
+          )
+          insert = '''
+              private void showRecoveryPage() {
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setGravity(Gravity.CENTER);
+                  root.setPadding(dp(28), dp(28), dp(28), dp(28));
+                  root.setBackgroundColor(UiTheme.background(this));
+                  TextView title = new TextView(this);
+                  title.setText("安全设置暂时无法打开");
+                  title.setTextSize(22);
+                  title.setTextColor(UiTheme.primaryText(this));
+                  title.setGravity(Gravity.CENTER);
+                  root.addView(title, fullWrap(dp(16)));
+                  TextView detail = new TextView(this);
+                  detail.setText("已阻止页面异常导致应用闪退。请返回主界面后重试。");
+                  detail.setTextSize(15);
+                  detail.setTextColor(UiTheme.secondaryText(this));
+                  detail.setGravity(Gravity.CENTER);
+                  root.addView(detail, fullWrap(dp(20)));
+                  Button back = optionButton("返回", "返回 EZ记账 主界面");
+                  back.setOnClickListener(v -> finish());
+                  root.addView(back, fullWrap(0));
+                  setContentView(root);
+              }
+          '''
+          marker = '    private void showSettings() {'
+          text = text.replace(marker, insert + '\n' + marker)
+          settings.write_text(text)
+
+          test = Path('app/src/test/java/com/neo/ezaccounting/AppStateMachineTest.java')
+          t = test.read_text()
+          extra = '''
+              @Test
+              public void safeTransitionRecoversFromUnexpectedLifecycleOrder() {
+                  AppStateMachine machine = new AppStateMachine(AppStateMachine.State.INITIALIZING);
+                  assertTrue(machine.transitionSafely(AppStateMachine.State.READY));
+                  assertEquals(AppStateMachine.State.READY, machine.getState());
+              }
+          '''
+          t = t.replace('\n}', extra + '\n}')
+          test.write_text(t)
+      - name: Run tests and build
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Commit patch
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add app
+          git commit -m 'fix: prevent startup and security settings crashes' || exit 0
+          git push origin HEAD:hotfix/v1.5.1
