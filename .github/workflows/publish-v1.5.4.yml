@@ -1,0 +1,128 @@
+name: Publish EZ记账 v1.5.4
+
+on:
+  push:
+    branches:
+      - release/publish-v1.5.4
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_CERT_SHA256: d29d3f581d1a90b12a067317c6f7295783727e1573e7c283e09ef398ca64b799
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout main source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Confirm version
+        run: |
+          grep -q "versionName '1.5.4'" app/build.gradle
+          grep -q "versionCode 12" app/build.gradle
+
+      - name: Validate signing secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+
+      - name: Restore signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/ez-accounting-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      - name: Verify fixed certificate
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          ACTUAL="$(keytool -list -v -keystore "$ANDROID_KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" | awk -F': ' 'tolower($0) ~ /sha256:/ {print $2; exit}' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          test "$ACTUAL" = "$EXPECTED_CERT_SHA256"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Run v1.5.4 tests
+        run: gradle --no-daemon :app:testDebugUnitTest
+
+      - name: Build fixed-signature APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon :app:assembleRelease
+
+      - name: Verify APK and prepare assets
+        run: |
+          mkdir -p dist
+          APK='app/build/outputs/apk/release/app-release.apk'
+          OUTPUT='dist/EZ记账-v1.5.4.apk'
+          CERT_INFO='dist/EZ记账-v1.5.4-签名信息.txt'
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          cp "$APK" "$OUTPUT"
+          CERT_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$OUTPUT" 2>&1)"
+          printf '%s\n' "$CERT_OUTPUT" | tee "$CERT_INFO"
+          ACTUAL="$(printf '%s\n' "$CERT_OUTPUT" | awk -F': ' 'tolower($0) ~ /certificate sha-256 digest/ {print $2; exit}' | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+          test "$ACTUAL" = "$EXPECTED_CERT_SHA256"
+          sha256sum "$OUTPUT" > "$OUTPUT.sha256"
+
+      - name: Write release notes
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## EZ记账 v1.5.4
+
+          本版本重新设计隐藏快捷功能的出现方式：
+
+          - 取消底部上拉式面板，改为屏幕中央悬浮快捷中心
+          - 全屏半透明遮罩、圆角卡片与缩放淡入动画
+          - 当前线路模式、线路、延迟和安全保护使用 2×2 状态块展示
+          - 常用操作改为两列卡片，减少纵向长度和滚动距离
+          - 服务器、更新和 WebView 工具独立分组
+          - 清除登录与缓存保留独立红色危险操作区
+          - 支持点击卡片外区域或右上角按钮关闭
+          - 保留现有快速启动、线路切换、安全验证和更新逻辑
+
+          可直接覆盖安装 v1.5.3，应用数据与配置会保留。
+          EOF
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EZ记账-v1.5.4-release
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Create or update GitHub Release
+        run: |
+          if gh release view v1.5.4 >/dev/null 2>&1; then
+            gh release edit v1.5.4 --title 'EZ记账 v1.5.4' --notes-file release-notes.md --latest
+            gh release upload v1.5.4 dist/* --clobber
+          else
+            gh release create v1.5.4 dist/* --title 'EZ记账 v1.5.4' --notes-file release-notes.md --latest
+          fi
