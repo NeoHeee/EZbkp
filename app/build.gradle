@@ -20,8 +20,8 @@ android {
         applicationId 'com.neo.ezaccounting'
         minSdk 26
         targetSdk 35
-        versionCode 12
-        versionName '1.5.4'
+        versionCode 13
+        versionName '1.5.5'
     }
     buildFeatures { buildConfig true }
     signingConfigs {
@@ -55,7 +55,6 @@ dependencies {
     implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.20')
     implementation 'androidx.activity:activity:1.7.2'
     implementation 'androidx.fragment:fragment:1.6.2'
-    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
     implementation 'androidx.biometric:biometric:1.1.0'
     testImplementation 'junit:junit:4.13.2'
 }
