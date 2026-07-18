@@ -9,7 +9,7 @@
         <intent
             android:action="com.neo.ezaccounting.action.ROUTES"
             android:targetPackage="com.neo.ezaccounting"
-            android:targetClass="com.neo.ezaccounting.MainActivity" />
+            android:targetClass="com.neo.ezaccounting.UnifiedMainActivity" />
     </shortcut>
     <shortcut
         android:shortcutId="security"
@@ -20,7 +20,7 @@
         <intent
             android:action="com.neo.ezaccounting.action.SECURITY"
             android:targetPackage="com.neo.ezaccounting"
-            android:targetClass="com.neo.ezaccounting.MainActivity" />
+            android:targetClass="com.neo.ezaccounting.UnifiedMainActivity" />
     </shortcut>
     <shortcut
         android:shortcutId="lock"
@@ -31,7 +31,7 @@
         <intent
             android:action="com.neo.ezaccounting.action.LOCK"
             android:targetPackage="com.neo.ezaccounting"
-            android:targetClass="com.neo.ezaccounting.MainActivity" />
+            android:targetClass="com.neo.ezaccounting.UnifiedMainActivity" />
     </shortcut>
     <shortcut
         android:shortcutId="update"
@@ -42,6 +42,6 @@
         <intent
             android:action="com.neo.ezaccounting.action.UPDATE"
             android:targetPackage="com.neo.ezaccounting"
-            android:targetClass="com.neo.ezaccounting.MainActivity" />
+            android:targetClass="com.neo.ezaccounting.UnifiedMainActivity" />
     </shortcut>
 </shortcuts>
