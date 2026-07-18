@@ -1,9 +1,10 @@
 name: Publish EZ记账 v1.5.4
 
 on:
-  push:
+  pull_request:
     branches:
-      - release/publish-v1.5.4
+      - main
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
