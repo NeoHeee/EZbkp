@@ -209,7 +209,7 @@ public final class RouteManager {
             connection.setReadTimeout(timeoutMs);
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod("GET");
-            connection.setRequestProperty("User-Agent", "EZAccounting/1.5.2");
+            connection.setRequestProperty("User-Agent", "EZAccounting/1.5.3");
             connection.setRequestProperty("Accept", "text/html,application/xhtml+xml");
             connection.connect();
             int code = connection.getResponseCode();

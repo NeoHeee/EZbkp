@@ -533,37 +533,80 @@ public class MainActivity extends FragmentActivity implements
     }
 
     private void openQuickActions() {
-        CharSequence[] items = {
-                "返回首页", "线路状态", "手动切换线路", "手动测速",
-                "在浏览器中打开", "更换线路地址", "立即锁定",
-                "进入 App 的安全验证", "检查更新", "清除登录与缓存", "WebView 信息"
-        };
-        String title = "隐藏功能菜单（" + routeCoordinator.getMode().label() +
-                " · " + routeName(routeCoordinator.getActiveType()) + "）";
-        new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setItems(items, (dialog, which) -> {
-                    switch (which) {
-                        case 0:
-                            if (routeCoordinator.getActiveUrl() != null) {
-                                webViewController.loadUrl(routeCoordinator.getActiveUrl());
-                            }
-                            break;
-                        case 1: showRouteStatusDialog(); break;
-                        case 2: showManualRouteDialog(); break;
-                        case 3: routeCoordinator.manualSpeedTest(); break;
-                        case 4: onOpenBrowser(); break;
-                        case 5: showServerSettings(); break;
-                        case 6: lockImmediately(); break;
-                        case 7: requestSecuritySettings(); break;
-                        case 8: checkForUpdates(true); break;
-                        case 9: confirmClearSiteData(); break;
-                        case 10: showWebViewInfo(); break;
-                        default: break;
-                    }
-                })
-                .setNegativeButton("关闭", null)
-                .show();
+        QuickActionsSheet.show(this, quickActionsModel(), new QuickActionsSheet.Listener() {
+            @Override
+            public void onHome() {
+                if (routeCoordinator.getActiveUrl() != null) {
+                    webViewController.loadUrl(routeCoordinator.getActiveUrl());
+                }
+            }
+
+            @Override
+            public void onRouteStatus() {
+                showRouteStatusDialog();
+            }
+
+            @Override
+            public void onManualRoute() {
+                showManualRouteDialog();
+            }
+
+            @Override
+            public void onSpeedTest() {
+                routeCoordinator.manualSpeedTest();
+            }
+
+            @Override
+            public void onOpenBrowser() {
+                MainActivity.this.onOpenBrowser();
+            }
+
+            @Override
+            public void onEditAddresses() {
+                showServerSettings();
+            }
+
+            @Override
+            public void onLock() {
+                lockImmediately();
+            }
+
+            @Override
+            public void onSecuritySettings() {
+                requestSecuritySettings();
+            }
+
+            @Override
+            public void onCheckUpdate() {
+                checkForUpdates(true);
+            }
+
+            @Override
+            public void onWebViewInfo() {
+                showWebViewInfo();
+            }
+
+            @Override
+            public void onClearSiteData() {
+                confirmClearSiteData();
+            }
+        });
+    }
+
+    private QuickActionsSheet.Model quickActionsModel() {
+        String latency = "待测速";
+        RouteCoordinator.Snapshot snapshot = routeCoordinator.getLastSnapshot();
+        if (snapshot != null && snapshot.selection != null) {
+            RouteManager.ProbeResult active = snapshot.selection.resultFor(
+                    routeCoordinator.getActiveType());
+            if (active != null && active.reachable && active.latencyMs > 0) {
+                latency = active.latencyMs + " ms";
+            }
+        }
+        String security = AppSecurity.isEnabled(this) ?
+                AppSecurity.getModeLabel(this) : "未开启保护";
+        return new QuickActionsSheet.Model(routeCoordinator.getMode().label(),
+                routeName(routeCoordinator.getActiveType()), latency, security);
     }
 
     private void showRouteStatusDialog() {
