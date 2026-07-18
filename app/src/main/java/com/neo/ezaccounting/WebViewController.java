@@ -7,7 +7,6 @@ import android.os.Build;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
@@ -21,7 +20,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+import java.lang.ref.WeakReference;
 
 public final class WebViewController {
     public enum FailureType {
@@ -59,12 +58,14 @@ public final class WebViewController {
         void onOpenQuickActions();
     }
 
+    private static WeakReference<WebViewController> activeController =
+            new WeakReference<>(null);
+
     private final Activity activity;
     private final Host host;
     private final DownloadController downloadController;
 
     private WebView webView;
-    private SwipeRefreshLayout swipeRefreshLayout;
     private String baseUrl;
     private boolean pageReady;
 
@@ -90,22 +91,24 @@ public final class WebViewController {
 
         FrameLayout root = new FrameLayout(activity);
         root.setBackgroundColor(UiTheme.webBackground(activity));
-        swipeRefreshLayout = new SwipeRefreshLayout(activity);
-        swipeRefreshLayout.setColorSchemeColors(UiTheme.accent(activity));
-        swipeRefreshLayout.setProgressBackgroundColorSchemeColor(UiTheme.surface(activity));
-        swipeRefreshLayout.setOnRefreshListener(this::reload);
 
         webView = new WebView(activity);
         webView.setBackgroundColor(UiTheme.webBackground(activity));
-        swipeRefreshLayout.addView(webView, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        root.addView(swipeRefreshLayout, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(webView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        activeController = new WeakReference<>(this);
 
         configure();
         setupHiddenGesture();
         loadUrl(initialUrl == null || initialUrl.trim().isEmpty() ? baseUrl : initialUrl);
         return root;
+    }
+
+    public static boolean reloadActive() {
+        WebViewController controller = activeController.get();
+        if (controller == null || !controller.isCreated()) return false;
+        controller.reload();
+        return true;
     }
 
     public void setBaseUrl(String baseUrl) {
@@ -135,7 +138,10 @@ public final class WebViewController {
     }
 
     public void reload() {
-        if (webView != null) webView.reload();
+        if (webView != null) {
+            pageReady = false;
+            webView.reload();
+        }
     }
 
     public boolean canGoBack() {
@@ -188,7 +194,7 @@ public final class WebViewController {
         settings.setMixedContentMode(secureOrigin ? WebSettings.MIXED_CONTENT_NEVER_ALLOW :
                 WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.5.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.5.5");
 
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
@@ -213,7 +219,6 @@ public final class WebViewController {
             @Override
             public void onPageFinished(WebView view, String url) {
                 pageReady = true;
-                if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);
                 host.onPageReady(url);
             }
 
@@ -221,7 +226,6 @@ public final class WebViewController {
             public void onReceivedError(WebView view, WebResourceRequest request,
                                         WebResourceError error) {
                 if (!request.isForMainFrame()) return;
-                if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);
                 int code = error == null ? 0 : error.getErrorCode();
                 String detail = error == null || error.getDescription() == null ?
                         "网页加载失败" : error.getDescription().toString();
@@ -234,7 +238,6 @@ public final class WebViewController {
                 if (!request.isForMainFrame() || errorResponse == null) return;
                 int status = errorResponse.getStatusCode();
                 if (status < 500) return;
-                if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);
                 host.onPageFailure(new Failure(FailureType.HTTP,
                         "服务器返回错误", "HTTP " + status + " " +
                         errorResponse.getReasonPhrase(), status, request.getUrl().toString()));
@@ -244,7 +247,6 @@ public final class WebViewController {
             public void onReceivedSslError(WebView view, SslErrorHandler handler,
                                            android.net.http.SslError error) {
                 handler.cancel();
-                if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);
                 host.onPageFailure(new Failure(FailureType.SSL,
                         "HTTPS证书验证失败",
                         error == null ? "证书无效，已阻止继续连接" : error.toString(),
@@ -371,13 +373,13 @@ public final class WebViewController {
     }
 
     public void destroy() {
+        if (activeController.get() == this) activeController.clear();
         if (webView != null) {
             webView.setOnTouchListener(null);
             webView.stopLoading();
             webView.destroy();
             webView = null;
         }
-        swipeRefreshLayout = null;
         pageReady = false;
     }
 }
