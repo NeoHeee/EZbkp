@@ -1,0 +1,162 @@
+name: Integrate v1.5.5 Refresh Changes
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply v1.5.5 source changes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, got {count}: {old[:80]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          web = 'app/src/main/java/com/neo/ezaccounting/WebViewController.java'
+          replace_once(web, '\nimport androidx.swiperefreshlayout.widget.SwipeRefreshLayout;\n', '\n')
+          replace_once(web, '    private SwipeRefreshLayout swipeRefreshLayout;\n', '')
+          replace_once(web, '''        FrameLayout root = new FrameLayout(activity);
+        root.setBackgroundColor(UiTheme.webBackground(activity));
+        swipeRefreshLayout = new SwipeRefreshLayout(activity);
+        swipeRefreshLayout.setColorSchemeColors(UiTheme.accent(activity));
+        swipeRefreshLayout.setProgressBackgroundColorSchemeColor(UiTheme.surface(activity));
+        swipeRefreshLayout.setOnRefreshListener(this::reload);
+
+        webView = new WebView(activity);
+        webView.setBackgroundColor(UiTheme.webBackground(activity));
+        swipeRefreshLayout.addView(webView, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(swipeRefreshLayout, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+''', '''        FrameLayout root = new FrameLayout(activity);
+        root.setBackgroundColor(UiTheme.webBackground(activity));
+
+        webView = new WebView(activity);
+        webView.setBackgroundColor(UiTheme.webBackground(activity));
+        root.addView(webView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+''')
+          for line in [
+              '                if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);\n',
+              '        swipeRefreshLayout = null;\n',
+          ]:
+              p = Path(web)
+              text = p.read_text(encoding='utf-8')
+              if line not in text:
+                  raise SystemExit(f'{web}: missing cleanup line {line!r}')
+              p.write_text(text.replace(line, ''), encoding='utf-8')
+          replace_once(web,
+              'settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.5.0");',
+              'settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.5.5");')
+
+          quick = 'app/src/main/java/com/neo/ezaccounting/QuickActionsSheet.java'
+          replace_once(quick, '''    public interface Listener {
+        void onHome();
+''', '''    public interface Listener {
+        void onHome();
+        void onRefresh();
+''')
+          replace_once(quick, '''                new ActionItem(android.R.drawable.ic_menu_view,
+                        "回到首页", "返回记账主页面", listener::onHome),
+                new ActionItem(android.R.drawable.ic_menu_info_details,
+''', '''                new ActionItem(android.R.drawable.ic_menu_view,
+                        "回到首页", "返回记账主页面", listener::onHome),
+                new ActionItem(android.R.drawable.ic_popup_sync,
+                        "刷新当前页面", "重新加载正在查看的网页", listener::onRefresh),
+                new ActionItem(android.R.drawable.ic_menu_info_details,
+''')
+
+          main = 'app/src/main/java/com/neo/ezaccounting/MainActivity.java'
+          replace_once(main, '''            @Override
+            public void onRouteStatus() {
+''', '''            @Override
+            public void onRefresh() {
+                if (!webViewController.isCreated()) {
+                    Toast.makeText(MainActivity.this, "当前页面尚未加载", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                webViewController.reload();
+                Toast.makeText(MainActivity.this, "正在刷新当前页面", Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onRouteStatus() {
+''')
+
+          gradle = 'app/build.gradle'
+          replace_once(gradle, "        versionCode 12\n        versionName '1.5.4'",
+                               "        versionCode 13\n        versionName '1.5.5'")
+          replace_once(gradle,
+              "    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'\n", '')
+
+          ci = '.github/workflows/android.yml'
+          p = Path(ci)
+          text = p.read_text(encoding='utf-8')
+          text = text.replace('v1.5.4-debug', 'v1.5.5-debug').replace('Debug-v1.5.4', 'Debug-v1.5.5')
+          p.write_text(text, encoding='utf-8')
+
+          readme = Path('README.md')
+          text = readme.read_text(encoding='utf-8')
+          text = text.replace('- 下拉刷新和网页返回历史', '- 快捷中心手动刷新当前页面和网页返回历史')
+          marker = '## v1.5.4 居中快捷中心\n'
+          section = '''## v1.5.5 刷新方式调整
+
+- 取消 WebView 下拉刷新手势，避免滚动页面或填写表单时误刷新
+- WebView 恢复为原生全屏滚动容器
+- 居中快捷中心增加“刷新当前页面”
+- 手动刷新只重新加载当前网页，不测速、不切换线路
+- 当前页面尚未创建时会给出提示
+- 原生错误恢复页继续保留“重新连接”
+
+'''
+          if marker not in text:
+              raise SystemExit('README marker missing')
+          text = text.replace(marker, section + marker, 1)
+          text = text.replace('- 当前版本：`1.5.4`', '- 当前版本：`1.5.5`')
+          readme.write_text(text, encoding='utf-8')
+          PY
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Run tests and build Debug APK
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+
+      - name: Commit verified source
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app README.md .github/workflows/android.yml
+          git commit -m 'feat: move refresh action into quick center for v1.5.5'
+          git push origin "HEAD:$BRANCH"
