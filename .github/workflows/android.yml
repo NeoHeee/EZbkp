@@ -35,21 +35,38 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Run stable-core tests and build debug APK
-        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Run hotfix tests and build debug APK
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug > v151-ci.log 2>&1
+          STATUS=$?
+          tail -n 220 v151-ci.log
+          exit $STATUS
+
+      - name: Upload full build log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: EZ记账-v1.5.1-build-log
+          path: v151-ci.log
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Prepare artifact
+        if: ${{ success() }}
         shell: bash
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk 'dist/EZ记账-v1.5.0-debug.apk'
+          cp app/build/outputs/apk/debug/app-debug.apk 'dist/EZ记账-v1.5.1-debug.apk'
           cd dist
-          sha256sum 'EZ记账-v1.5.0-debug.apk' > 'EZ记账-v1.5.0-debug.apk.sha256'
+          sha256sum 'EZ记账-v1.5.1-debug.apk' > 'EZ记账-v1.5.1-debug.apk.sha256'
 
       - name: Upload debug APK
+        if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
-          name: EZ记账-Debug-v1.5.0
+          name: EZ记账-Debug-v1.5.1
           path: dist/*
           if-no-files-found: error
           retention-days: 30
