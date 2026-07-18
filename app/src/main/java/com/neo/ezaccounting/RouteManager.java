@@ -72,12 +72,16 @@ public final class RouteManager {
 
         public String label() {
             if (!isConfigured()) return "未配置";
+            if (reachable && statusCode == 0) {
+                return latencyMs > 0 ? "上次 " + latencyMs + " ms" : "待后台测速";
+            }
             if (reachable) return latencyMs + " ms";
             return "不可用（" + errorLabel(errorKind) + "）";
         }
 
         public String diagnostic() {
             if (!isConfigured()) return "未配置地址";
+            if (reachable && statusCode == 0) return "使用缓存线路，后台测速中";
             if (reachable) {
                 return "HTTP " + statusCode + "，响应 " + latencyMs + " ms";
             }
@@ -205,7 +209,7 @@ public final class RouteManager {
             connection.setReadTimeout(timeoutMs);
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod("GET");
-            connection.setRequestProperty("User-Agent", "EZAccounting/1.5.0");
+            connection.setRequestProperty("User-Agent", "EZAccounting/1.5.2");
             connection.setRequestProperty("Accept", "text/html,application/xhtml+xml");
             connection.connect();
             int code = connection.getResponseCode();
