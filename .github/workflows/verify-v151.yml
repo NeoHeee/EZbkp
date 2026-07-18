@@ -1,0 +1,40 @@
+name: Verify v1.5.1 Hotfix
+
+on:
+  push:
+    branches: [hotfix/v1.5.1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Test and build
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug > v151-build.log 2>&1
+          STATUS=$?
+          tail -n 200 v151-build.log
+          exit $STATUS
+      - name: Upload complete log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: v1.5.1-build-log
+          path: v151-build.log
+          if-no-files-found: error
+          retention-days: 7
