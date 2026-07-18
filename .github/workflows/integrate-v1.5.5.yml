@@ -1,9 +1,9 @@
 name: Integrate v1.5.5 Refresh Changes
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - feature/refresh-in-quick-center-v1.5.5
 
 permissions:
   contents: write
@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: feature/refresh-in-quick-center-v1.5.5
           fetch-depth: 0
 
       - name: Apply v1.5.5 source changes
@@ -152,11 +152,9 @@ jobs:
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
 
       - name: Commit verified source
-        env:
-          BRANCH: ${{ github.head_ref }}
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app README.md .github/workflows/android.yml
           git commit -m 'feat: move refresh action into quick center for v1.5.5'
-          git push origin "HEAD:$BRANCH"
+          git push origin HEAD:feature/refresh-in-quick-center-v1.5.5
