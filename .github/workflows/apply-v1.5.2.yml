@@ -1,9 +1,10 @@
 name: Integrate v1.5.2 Fast Start
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/fast-start-v1.5.2
+      - main
+    types: [synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -11,7 +12,7 @@ permissions:
 
 jobs:
   integrate:
-    if: ${{ !contains(github.event.head_commit.message, '[v1.5.2-applied]') }}
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
