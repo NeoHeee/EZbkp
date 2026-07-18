@@ -20,12 +20,25 @@ jobs:
           ref: fix/fast-start-v1.5.2
           fetch-depth: 0
       - name: Apply source patch without changing protected workflows
+        shell: bash
         run: |
+          set +e
           cp .github/workflows/android.yml /tmp/android.yml
           cp .github/workflows/signed-release.yml /tmp/signed-release.yml
-          python3 scripts/apply_v1_5_2.py
+          python3 scripts/apply_v1_5_2.py > patch-v1.5.2.log 2>&1
+          STATUS=$?
           cp /tmp/android.yml .github/workflows/android.yml
           cp /tmp/signed-release.yml .github/workflows/signed-release.yml
+          cat patch-v1.5.2.log
+          exit $STATUS
+      - name: Upload patch diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: v1.5.2-patch-log
+          path: patch-v1.5.2.log
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
