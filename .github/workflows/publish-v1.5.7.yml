@@ -10,7 +10,76 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      EXPECTED_CERT: d29d3f581d1a90b12a067317c6f7295783727e1573e7c283e09ef398ca64b799
+      GH_TOKEN: ${{ github.token }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
+
+      - name: Confirm version
+        run: |
+          grep -q "versionCode 15" app/build.gradle
+          grep -q "versionName '1.5.7'" app/build.gradle
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Restore fixed signing key
+        env:
+          KEYSTORE_DATA: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_DATA"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/ez-accounting-release.jks"
+          printf '%s' "$KEYSTORE_DATA" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE_PATH=$ANDROID_KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      - name: Test and build
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleRelease
+
+      - name: Verify and prepare files
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk 'dist/EZ记账-v1.5.7.apk'
+          INFO="$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs 'dist/EZ记账-v1.5.7.apk' 2>&1)"
+          printf '%s\n' "$INFO" | tee 'dist/EZ记账-v1.5.7-签名信息.txt'
+          ACTUAL="$(printf '%s\n' "$INFO" | awk -F': ' 'tolower($0) ~ /certificate sha-256 digest/ {print $2; exit}' | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+          test "$ACTUAL" = "$EXPECTED_CERT"
+          sha256sum 'dist/EZ记账-v1.5.7.apk' > 'dist/EZ记账-v1.5.7.apk.sha256'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EZ记账-v1.5.7-release
+          path: dist/*
+          retention-days: 90
+
+      - name: Publish GitHub Release
+        run: |
+          cat > notes.md <<'EOF'
+          ## EZ记账 v1.5.7
+
+          - 修复首页返回时看起来像刷新、无法正常退出的问题
+          - 首页不再消费重定向或线路恢复产生的重复 WebView 历史
+          - 第一次返回提示再次返回退出，第二次直接退出
+          - 修复第二次返回手势被触摸监听误取消的问题
+          - 非首页仍优先返回上一网页
+
+          可直接覆盖安装 v1.5.6，应用数据与配置会保留。
+          EOF
+          gh release create v1.5.7 dist/* --title 'EZ记账 v1.5.7' --notes-file notes.md --latest
