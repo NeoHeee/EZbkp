@@ -65,10 +65,25 @@ public final class UnifiedMainActivity extends MainActivity {
                 return;
             }
 
-            boolean domAtHome = EzBookkeepingPageDetector.isHomeResult(result);
+            EzBookkeepingPageDetector.PageIdentity identity =
+                    EzBookkeepingPageDetector.parseIdentity(result);
+            boolean atHome;
+            switch (identity) {
+                case HOME:
+                    atHome = true;
+                    break;
+                case OTHER:
+                    atHome = false;
+                    break;
+                case UNKNOWN:
+                default:
+                    atHome = urlAtHome;
+                    break;
+            }
+
             performBackDecision(AppStateMachine.State.READY, webView,
                     hasConfiguredRoute, webView.canGoBack(),
-                    domAtHome || urlAtHome, homeUrl, System.currentTimeMillis());
+                    atHome, homeUrl, System.currentTimeMillis());
 
             if (queuedBackPresses > 0 && !isFinishing() && !isDestroyed()) {
                 queuedBackPresses--;
