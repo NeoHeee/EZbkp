@@ -2,7 +2,6 @@ package com.neo.ezaccounting;
 
 import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
@@ -33,14 +32,6 @@ public final class UnifiedMainActivity extends MainActivity {
     @Override
     public void onBackPressed() {
         getOnBackPressedDispatcher().onBackPressed();
-    }
-
-    @Override
-    public boolean dispatchTouchEvent(MotionEvent event) {
-        if (event != null && event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-            resetExitConfirmation();
-        }
-        return super.dispatchTouchEvent(event);
     }
 
     private void handleUnifiedBack() {
