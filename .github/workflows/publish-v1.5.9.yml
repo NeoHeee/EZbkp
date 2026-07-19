@@ -1,0 +1,98 @@
+name: Publish v1.5.9
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_CERT_SHA256: d29d3f581d1a90b12a067317c6f7295783727e1573e7c283e09ef398ca64b799
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Confirm version
+        run: |
+          grep -q "versionCode 17" app/build.gradle
+          grep -q "versionName '1.5.9'" app/build.gradle
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Restore fixed signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          KEYSTORE_PATH="$RUNNER_TEMP/ez-accounting-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      - name: Test and build
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleRelease
+
+      - name: Verify and prepare files
+        run: |
+          mkdir -p dist
+          APK='app/build/outputs/apk/release/app-release.apk'
+          OUTPUT='dist/EZ记账-v1.5.9.apk'
+          CERT_INFO='dist/EZ记账-v1.5.9-签名信息.txt'
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          cp "$APK" "$OUTPUT"
+          CERT_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$OUTPUT" 2>&1)"
+          printf '%s\n' "$CERT_OUTPUT" | tee "$CERT_INFO"
+          ACTUAL="$(printf '%s\n' "$CERT_OUTPUT" | awk -F': ' 'tolower($0) ~ /certificate sha-256 digest/ {print $2; exit}' | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+          test "$ACTUAL" = "$EXPECTED_CERT_SHA256"
+          sha256sum "$OUTPUT" > "$OUTPUT.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EZ记账-v1.5.9-release
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish GitHub Release
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## EZ记账 v1.5.9
+
+          - 首页检测限定在 `#main-view` 的当前 Framework7 页面
+          - 隐藏的旧首页、`.page-previous` 和嵌套 View 不再参与判断
+          - 首页识别改为 HOME / OTHER / UNKNOWN 三态
+          - DOM 明确为非首页时，不再被根地址 URL 覆盖
+          - 仅在页面尚未渲染或检测异常时使用 URL 兜底
+          - 增加当前页面归属和三态解析回归测试
+
+          可直接覆盖安装 v1.5.8，应用数据与配置会保留。
+          EOF
+          if gh release view v1.5.9 >/dev/null 2>&1; then
+            gh release edit v1.5.9 --title 'EZ记账 v1.5.9' --notes-file release-notes.md --latest
+            gh release upload v1.5.9 dist/* --clobber
+          else
+            gh release create v1.5.9 dist/* --title 'EZ记账 v1.5.9' --notes-file release-notes.md --latest
+          fi
