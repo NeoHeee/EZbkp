@@ -34,8 +34,14 @@ public final class BackNavigationPolicy {
         }
         if (safeState == AppStateMachine.State.READY ||
                 safeState == AppStateMachine.State.LOADING_WEB) {
-            if (canGoBack) return Action.WEB_BACK;
-            if (!atHome) return Action.GO_HOME;
+            // The root page may still have duplicate WebView history entries after redirects,
+            // route restoration or switching between local/public endpoints. Once the user is
+            // visibly at the root page, those stale entries must not take precedence over the
+            // app-level double-back-to-exit behavior.
+            if (!atHome) {
+                if (canGoBack) return Action.WEB_BACK;
+                return Action.GO_HOME;
+            }
         }
         return now - lastBackPressedAt <= EXIT_CONFIRM_WINDOW_MS ?
                 Action.EXIT : Action.SHOW_EXIT_HINT;
