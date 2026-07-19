@@ -8,10 +8,20 @@ import static org.junit.Assert.assertTrue;
 
 public class BackNavigationPolicyTest {
     @Test
-    public void webHistoryHasHighestPriorityOnWebPage() {
+    public void webHistoryIsUsedWhenCurrentPageIsNotHome() {
         assertEquals(BackNavigationPolicy.Action.WEB_BACK,
                 BackNavigationPolicy.decide(AppStateMachine.State.READY,
                         true, true, false, 10_000L, 0L));
+    }
+
+    @Test
+    public void homeIgnoresStaleWebHistoryAndUsesDoubleBackExit() {
+        assertEquals(BackNavigationPolicy.Action.SHOW_EXIT_HINT,
+                BackNavigationPolicy.decide(AppStateMachine.State.READY,
+                        true, true, true, 10_000L, 0L));
+        assertEquals(BackNavigationPolicy.Action.EXIT,
+                BackNavigationPolicy.decide(AppStateMachine.State.READY,
+                        true, true, true, 11_000L, 10_000L));
     }
 
     @Test
