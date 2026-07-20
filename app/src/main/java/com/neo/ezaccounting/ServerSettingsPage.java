@@ -4,10 +4,13 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
+import android.view.WindowInsets;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
@@ -19,6 +22,10 @@ import android.widget.TextView;
 public final class ServerSettingsPage {
     public interface Listener {
         void onSaved(String localUrl, String publicUrl);
+    }
+
+    private static final class ImeState {
+        int bottomInset;
     }
 
     private ServerSettingsPage() {}
@@ -94,13 +101,15 @@ public final class ServerSettingsPage {
         note.setLineSpacing(0, 1.15f);
         content.addView(note, fullWrap(activity, 22));
 
-        keepVisibleAboveKeyboard(activity, scrollView, localInput);
-        keepVisibleAboveKeyboard(activity, scrollView, publicInput);
+        ImeState imeState = new ImeState();
+        installImeAwareScrolling(activity, scrollView, imeState);
+        keepVisibleAboveKeyboard(activity, scrollView, localInput, imeState);
+        keepVisibleAboveKeyboard(activity, scrollView, publicInput, imeState);
 
         localInput.setOnEditorActionListener((view, actionId, event) -> {
             if (actionId != EditorInfo.IME_ACTION_NEXT) return false;
             publicInput.requestFocus();
-            scrollFocusedFieldIntoView(activity, scrollView, publicInput);
+            scrollFocusedFieldIntoView(activity, scrollView, publicInput, imeState);
             return true;
         });
 
@@ -116,7 +125,7 @@ public final class ServerSettingsPage {
             if (blank(localRaw) && blank(publicRaw)) {
                 localInput.setError("请至少填写一个地址");
                 localInput.requestFocus();
-                scrollFocusedFieldIntoView(activity, scrollView, localInput);
+                scrollFocusedFieldIntoView(activity, scrollView, localInput, imeState);
                 return;
             }
             String normalizedLocal = ServerAddressValidator.normalize(localRaw);
@@ -124,13 +133,13 @@ public final class ServerSettingsPage {
             if (!blank(localRaw) && normalizedLocal == null) {
                 localInput.setError("请输入有效的 HTTP 或 HTTPS 地址");
                 localInput.requestFocus();
-                scrollFocusedFieldIntoView(activity, scrollView, localInput);
+                scrollFocusedFieldIntoView(activity, scrollView, localInput, imeState);
                 return;
             }
             if (!blank(publicRaw) && normalizedPublic == null) {
                 publicInput.setError("请输入有效的 HTTP 或 HTTPS 地址");
                 publicInput.requestFocus();
-                scrollFocusedFieldIntoView(activity, scrollView, publicInput);
+                scrollFocusedFieldIntoView(activity, scrollView, publicInput, imeState);
                 return;
             }
             listener.onSaved(normalizedLocal == null ? "" : normalizedLocal,
@@ -139,30 +148,123 @@ public final class ServerSettingsPage {
         return scrollView;
     }
 
+    private static void installImeAwareScrolling(Activity activity, ScrollView scrollView,
+                                                 ImeState state) {
+        final int baseBottomPadding = dp(activity, 24);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            scrollView.setOnApplyWindowInsetsListener((view, insets) -> {
+                boolean imeVisible = insets.isVisible(WindowInsets.Type.ime());
+                int imeBottom = imeVisible
+                        ? insets.getInsets(WindowInsets.Type.ime()).bottom : 0;
+                int navigationBottom = insets.getInsets(WindowInsets.Type.navigationBars()).bottom;
+                state.bottomInset = Math.max(0, imeBottom);
+
+                int desiredBottomPadding = baseBottomPadding +
+                        Math.max(state.bottomInset, navigationBottom);
+                if (view.getPaddingBottom() != desiredBottomPadding) {
+                    view.setPadding(view.getPaddingLeft(), view.getPaddingTop(),
+                            view.getPaddingRight(), desiredBottomPadding);
+                }
+
+                if (imeVisible) {
+                    View focused = activity.getCurrentFocus();
+                    if (focused != null) {
+                        scrollFocusedFieldIntoView(activity, scrollView, focused, state);
+                    }
+                }
+                return insets;
+            });
+            scrollView.post(scrollView::requestApplyInsets);
+            return;
+        }
+
+        View decorView = activity.getWindow().getDecorView();
+        Rect visibleFrame = new Rect();
+        ViewTreeObserver.OnGlobalLayoutListener listener = () -> {
+            decorView.getWindowVisibleDisplayFrame(visibleFrame);
+            int rootHeight = decorView.getRootView().getHeight();
+            int hiddenHeight = Math.max(0, rootHeight - visibleFrame.bottom);
+            int keyboardHeight = hiddenHeight > rootHeight * 0.15f ? hiddenHeight : 0;
+            state.bottomInset = keyboardHeight;
+
+            int desiredBottomPadding = baseBottomPadding + keyboardHeight;
+            if (scrollView.getPaddingBottom() != desiredBottomPadding) {
+                scrollView.setPadding(scrollView.getPaddingLeft(), scrollView.getPaddingTop(),
+                        scrollView.getPaddingRight(), desiredBottomPadding);
+            }
+
+            if (keyboardHeight > 0) {
+                View focused = activity.getCurrentFocus();
+                if (focused != null) {
+                    scrollFocusedFieldIntoView(activity, scrollView, focused, state);
+                }
+            }
+        };
+        decorView.getViewTreeObserver().addOnGlobalLayoutListener(listener);
+        scrollView.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override
+            public void onViewAttachedToWindow(View view) {}
+
+            @Override
+            public void onViewDetachedFromWindow(View view) {
+                if (decorView.getViewTreeObserver().isAlive()) {
+                    decorView.getViewTreeObserver().removeOnGlobalLayoutListener(listener);
+                }
+                scrollView.removeOnAttachStateChangeListener(this);
+            }
+        });
+    }
+
     private static void keepVisibleAboveKeyboard(Activity activity, ScrollView scrollView,
-                                                 EditText input) {
+                                                  EditText input, ImeState state) {
         input.setOnFocusChangeListener((view, hasFocus) -> {
-            if (hasFocus) scrollFocusedFieldIntoView(activity, scrollView, view);
+            if (hasFocus) scrollFocusedFieldIntoView(activity, scrollView, view, state);
         });
     }
 
     private static void scrollFocusedFieldIntoView(Activity activity, ScrollView scrollView,
-                                                   View target) {
+                                                    View target, ImeState state) {
         scrollView.postDelayed(() -> {
             if (!target.isAttachedToWindow()) return;
-            Rect rect = new Rect();
-            target.getDrawingRect(rect);
-            scrollView.offsetDescendantRectToMyCoords(target, rect);
-            rect.bottom += dp(activity, 24);
 
-            int visibleTop = scrollView.getScrollY();
-            int visibleBottom = visibleTop + scrollView.getHeight();
-            if (rect.bottom > visibleBottom) {
-                scrollView.smoothScrollBy(0, rect.bottom - visibleBottom);
-            } else if (rect.top < visibleTop) {
-                scrollView.smoothScrollBy(0, rect.top - visibleTop);
+            int margin = dp(activity, 24);
+            int[] targetLocation = new int[2];
+            int[] scrollLocation = new int[2];
+            int[] decorLocation = new int[2];
+            target.getLocationOnScreen(targetLocation);
+            scrollView.getLocationOnScreen(scrollLocation);
+            View decorView = activity.getWindow().getDecorView();
+            decorView.getLocationOnScreen(decorLocation);
+
+            int targetTop = targetLocation[1];
+            int targetBottom = targetTop + target.getHeight();
+            int scrollTop = scrollLocation[1];
+            int scrollBottom = scrollTop + scrollView.getHeight();
+            int windowBottom = decorLocation[1] + decorView.getHeight();
+
+            Rect visibleFrame = new Rect();
+            decorView.getWindowVisibleDisplayFrame(visibleFrame);
+            int frameObstruction = Math.max(0, windowBottom - visibleFrame.bottom);
+            boolean frameShowsKeyboard = frameObstruction > decorView.getHeight() * 0.15f;
+
+            int keyboardTop = Integer.MAX_VALUE;
+            if (frameShowsKeyboard) keyboardTop = visibleFrame.bottom;
+            if (state.bottomInset > 0) {
+                keyboardTop = Math.min(keyboardTop, windowBottom - state.bottomInset);
             }
-        }, 320L);
+
+            int safeBottom = scrollBottom;
+            if (keyboardTop != Integer.MAX_VALUE) safeBottom = Math.min(safeBottom, keyboardTop);
+            safeBottom -= margin;
+            int safeTop = Math.max(scrollTop + margin, visibleFrame.top + margin);
+
+            if (targetBottom > safeBottom) {
+                scrollView.smoothScrollBy(0, targetBottom - safeBottom);
+            } else if (targetTop < safeTop) {
+                scrollView.smoothScrollBy(0, targetTop - safeTop);
+            }
+        }, 120L);
     }
 
     private static EditText input(Activity activity, String hint, String value) {
