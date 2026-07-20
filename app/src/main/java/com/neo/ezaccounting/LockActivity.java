@@ -17,6 +17,7 @@ import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -70,17 +71,11 @@ public class LockActivity extends FragmentActivity {
         root.setPadding(dp(28), dp(42), dp(28), dp(28));
         root.setBackgroundColor(UiTheme.background(this));
 
-        TextView logo = new TextView(this);
-        logo.setText("¥✓");
-        logo.setTextSize(28);
-        logo.setTextColor(Color.WHITE);
-        logo.setGravity(Gravity.CENTER);
-        logo.setTypeface(null, android.graphics.Typeface.BOLD);
-        GradientDrawable logoBg = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(15, 118, 110), Color.rgb(14, 165, 164)});
-        logoBg.setCornerRadius(dp(22));
-        logo.setBackground(logoBg);
+        ImageView logo = new ImageView(this);
+        logo.setImageDrawable(getApplicationInfo().loadIcon(getPackageManager()));
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        logo.setAdjustViewBounds(true);
+        logo.setContentDescription("EZ记账应用图标");
         LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(dp(78), dp(78));
         logoParams.bottomMargin = dp(22);
         root.addView(logo, logoParams);
