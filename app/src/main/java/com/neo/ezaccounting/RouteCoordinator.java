@@ -78,6 +78,7 @@ public final class RouteCoordinator {
     private boolean checkInProgress;
     private Trigger pendingTrigger;
     private Snapshot lastSnapshot;
+    private String lastWebVerifiedUrl;
 
     public RouteCoordinator(SharedPreferences preferences, Host host) {
         this(preferences, host, new RouteManager(), new RouteSwitchPolicy());
@@ -94,6 +95,11 @@ public final class RouteCoordinator {
     public void setAddresses(String localUrl, String publicUrl) {
         this.localUrl = safe(localUrl);
         this.publicUrl = safe(publicUrl);
+        if (lastWebVerifiedUrl != null &&
+                !lastWebVerifiedUrl.equals(this.localUrl) &&
+                !lastWebVerifiedUrl.equals(this.publicUrl)) {
+            lastWebVerifiedUrl = null;
+        }
     }
 
     public boolean hasConfiguredRoute() {
@@ -164,10 +170,17 @@ public final class RouteCoordinator {
 
     public void markPageSuccess() {
         switchPolicy.recordSuccess(activeType);
+        if (activeUrl == null || activeType == RouteManager.TYPE_NONE) return;
+        lastWebVerifiedUrl = activeUrl;
+        preferences.edit().putString(KEY_LAST_ROUTE, activeUrl).apply();
+        promoteActiveSnapshotToWebVerified();
     }
 
     public void markPageFailure() {
         switchPolicy.recordFailure(activeType);
+        if (activeUrl != null && activeUrl.equals(lastWebVerifiedUrl)) {
+            lastWebVerifiedUrl = null;
+        }
         requestCheck(Trigger.PAGE_FAILURE);
     }
 
@@ -190,10 +203,20 @@ public final class RouteCoordinator {
             checkInProgress = false;
             RouteMode mode = getMode();
             String lastRoute = preferences.getString(KEY_LAST_ROUTE, "");
-            RouteManager.ProbeResult selected = RouteManager.selectForMode(mode,
-                    raw.local, raw.publicRoute, lastRoute);
-            RouteManager.Selection selection = new RouteManager.Selection(selected,
-                    raw.local, raw.publicRoute);
+
+            RouteManager.ProbeResult local = preserveWebVerification(raw.local);
+            RouteManager.ProbeResult remote = preserveWebVerification(raw.publicRoute);
+            boolean allowWebFallback = trigger != Trigger.MANUAL_SPEED_TEST &&
+                    trigger != Trigger.PAGE_FAILURE;
+            RouteManager.ProbeResult selected = RouteManager.selectForModeWithWebFallback(
+                    mode, local, remote, lastRoute, allowWebFallback);
+
+            if (selected != null && selected.verificationPending) {
+                if (selected.type == RouteManager.TYPE_LOCAL) local = selected;
+                if (selected.type == RouteManager.TYPE_PUBLIC) remote = selected;
+            }
+
+            RouteManager.Selection selection = new RouteManager.Selection(selected, local, remote);
             Snapshot snapshot = new Snapshot(selection, mode, activeUrl, activeType,
                     System.currentTimeMillis());
             lastSnapshot = snapshot;
@@ -201,7 +224,7 @@ public final class RouteCoordinator {
             host.onRouteSnapshot(snapshot, trigger);
 
             if (trigger == Trigger.MANUAL_SPEED_TEST) {
-                host.onRouteStable(snapshot, "测速完成", trigger);
+                host.onRouteStable(snapshot, "测速完成；网页实际访问结果优先于独立探测", trigger);
                 drainPending();
                 return;
             }
@@ -220,7 +243,8 @@ public final class RouteCoordinator {
             } else if (activeUrl != null && snapshot.activeReachable()) {
                 host.onRouteStable(snapshot, decision.reason, trigger);
             } else if (trigger == Trigger.BACKGROUND_STARTUP && activeUrl != null) {
-                host.onRouteStable(snapshot, decision.reason, trigger);
+                host.onRouteStable(snapshot,
+                        "后台独立探测未通过，继续等待 WebView 实际访问结果", trigger);
             } else {
                 host.onRouteUnavailable(snapshot, decision.reason, trigger);
             }
@@ -228,20 +252,51 @@ public final class RouteCoordinator {
         });
     }
 
+    private RouteManager.ProbeResult preserveWebVerification(
+            RouteManager.ProbeResult result) {
+        if (result == null || result.reachable || lastWebVerifiedUrl == null ||
+                result.url == null || !result.url.equals(lastWebVerifiedUrl)) {
+            return result;
+        }
+        return result.asWebVerified(lastWebVerifiedUrl);
+    }
+
+    private void promoteActiveSnapshotToWebVerified() {
+        RouteManager.ProbeResult local = lastSnapshot == null ? null : lastSnapshot.local();
+        RouteManager.ProbeResult remote = lastSnapshot == null ? null : lastSnapshot.publicRoute();
+        RouteManager.ProbeResult active = lastSnapshot == null || lastSnapshot.selection == null ?
+                null : lastSnapshot.selection.resultFor(activeType);
+
+        if (active == null) {
+            active = new RouteManager.ProbeResult(activeUrl, activeType, true, -1L, 0,
+                    RouteManager.ErrorKind.NONE, "WebView 已实际加载成功");
+        } else {
+            active = active.asWebVerified(activeUrl);
+        }
+
+        if (activeType == RouteManager.TYPE_LOCAL) local = active;
+        if (activeType == RouteManager.TYPE_PUBLIC) remote = active;
+        RouteManager.Selection selection = new RouteManager.Selection(active, local, remote);
+        lastSnapshot = new Snapshot(selection, getMode(), activeUrl, activeType,
+                System.currentTimeMillis());
+    }
+
     private void handleForcedMode(Snapshot snapshot, Trigger trigger) {
         RouteManager.ProbeResult target = snapshot.selection == null ? null :
                 snapshot.selection.selected;
         if (target == null || !target.reachable) {
             String reason = snapshot.mode == RouteMode.LOCAL ? "固定的本地线路不可用" :
-                    "固定的公网线路不可用";
+                    "固定的公网线路独立探测未通过";
             if (trigger == Trigger.BACKGROUND_STARTUP && activeUrl != null) {
-                host.onRouteStable(snapshot, reason + "，等待页面加载结果", trigger);
+                host.onRouteStable(snapshot, reason + "，等待页面实际加载结果", trigger);
             } else {
                 host.onRouteUnavailable(snapshot, reason, trigger);
             }
             return;
         }
-        activate(target, snapshot, "按手动线路模式切换", trigger);
+        String reason = target.verificationPending ?
+                "独立探测未通过，尝试由 WebView 实际验证" : "按手动线路模式切换";
+        activate(target, snapshot, reason, trigger);
     }
 
     private void activate(RouteManager.ProbeResult target, Snapshot snapshot, String reason,
@@ -251,7 +306,7 @@ public final class RouteCoordinator {
         activeType = target.type;
         preferences.edit().putString(KEY_LAST_ROUTE, activeUrl).apply();
         if (changed) switchPolicy.recordSwitch(snapshot.checkedAt);
-        switchPolicy.recordSuccess(activeType);
+        if (!target.verificationPending) switchPolicy.recordSuccess(activeType);
         Snapshot activated = new Snapshot(snapshot.selection, snapshot.mode, activeUrl,
                 activeType, snapshot.checkedAt);
         lastSnapshot = activated;
@@ -261,10 +316,16 @@ public final class RouteCoordinator {
     private void saveLatencies(Snapshot snapshot) {
         RouteManager.ProbeResult local = snapshot.local();
         RouteManager.ProbeResult remote = snapshot.publicRoute();
-        preferences.edit()
-                .putLong(KEY_LOCAL_LATENCY, local == null ? -1L : local.latencyMs)
-                .putLong(KEY_PUBLIC_LATENCY, remote == null ? -1L : remote.latencyMs)
-                .apply();
+        SharedPreferences.Editor editor = preferences.edit();
+        if (local != null && local.reachable && !local.verificationPending &&
+                !local.webVerified && local.latencyMs > 0) {
+            editor.putLong(KEY_LOCAL_LATENCY, local.latencyMs);
+        }
+        if (remote != null && remote.reachable && !remote.verificationPending &&
+                !remote.webVerified && remote.latencyMs > 0) {
+            editor.putLong(KEY_PUBLIC_LATENCY, remote.latencyMs);
+        }
+        editor.apply();
     }
 
     private Trigger chooseHigherPriority(Trigger current, Trigger next) {
