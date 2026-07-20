@@ -2,13 +2,16 @@ package com.neo.ezaccounting;
 
 import android.app.Activity;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -24,7 +27,9 @@ public final class ServerSettingsPage {
                               Listener listener) {
         ScrollView scrollView = new ScrollView(activity);
         scrollView.setFillViewport(true);
+        scrollView.setClipToPadding(false);
         scrollView.setBackgroundColor(UiTheme.background(activity));
+        scrollView.setPadding(0, 0, 0, dp(activity, 24));
 
         LinearLayout content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -33,17 +38,11 @@ public final class ServerSettingsPage {
         scrollView.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        TextView logo = new TextView(activity);
-        logo.setText("¥✓");
-        logo.setTextSize(29);
-        logo.setTextColor(Color.WHITE);
-        logo.setGravity(Gravity.CENTER);
-        logo.setTypeface(null, android.graphics.Typeface.BOLD);
-        GradientDrawable logoBackground = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(15, 118, 110), Color.rgb(14, 165, 164)});
-        logoBackground.setCornerRadius(dp(activity, 24));
-        logo.setBackground(logoBackground);
+        ImageView logo = new ImageView(activity);
+        logo.setImageDrawable(activity.getApplicationInfo().loadIcon(activity.getPackageManager()));
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        logo.setAdjustViewBounds(true);
+        logo.setContentDescription("EZ记账应用图标");
         LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(
                 dp(activity, 84), dp(activity, 84));
         logoParams.bottomMargin = dp(activity, 24);
@@ -65,11 +64,13 @@ public final class ServerSettingsPage {
         content.addView(text(activity, "本地地址", 14.5f,
                 UiTheme.primaryText(activity), true), fullWrap(activity, 8));
         EditText localInput = input(activity, "http://192.168.1.100:8080", localUrl);
+        localInput.setImeOptions(EditorInfo.IME_ACTION_NEXT);
         content.addView(localInput, fullWrap(activity, 16));
 
         content.addView(text(activity, "公网地址", 14.5f,
                 UiTheme.primaryText(activity), true), fullWrap(activity, 8));
         EditText publicInput = input(activity, "https://money.example.com", publicUrl);
+        publicInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
         content.addView(publicInput, fullWrap(activity, 18));
 
         Button save = new Button(activity);
@@ -93,21 +94,43 @@ public final class ServerSettingsPage {
         note.setLineSpacing(0, 1.15f);
         content.addView(note, fullWrap(activity, 22));
 
+        keepVisibleAboveKeyboard(activity, scrollView, localInput);
+        keepVisibleAboveKeyboard(activity, scrollView, publicInput);
+
+        localInput.setOnEditorActionListener((view, actionId, event) -> {
+            if (actionId != EditorInfo.IME_ACTION_NEXT) return false;
+            publicInput.requestFocus();
+            scrollFocusedFieldIntoView(activity, scrollView, publicInput);
+            return true;
+        });
+
+        publicInput.setOnEditorActionListener((view, actionId, event) -> {
+            if (actionId != EditorInfo.IME_ACTION_DONE) return false;
+            save.performClick();
+            return true;
+        });
+
         save.setOnClickListener(v -> {
             String localRaw = localInput.getText().toString();
             String publicRaw = publicInput.getText().toString();
             if (blank(localRaw) && blank(publicRaw)) {
                 localInput.setError("请至少填写一个地址");
+                localInput.requestFocus();
+                scrollFocusedFieldIntoView(activity, scrollView, localInput);
                 return;
             }
             String normalizedLocal = ServerAddressValidator.normalize(localRaw);
             String normalizedPublic = ServerAddressValidator.normalize(publicRaw);
             if (!blank(localRaw) && normalizedLocal == null) {
                 localInput.setError("请输入有效的 HTTP 或 HTTPS 地址");
+                localInput.requestFocus();
+                scrollFocusedFieldIntoView(activity, scrollView, localInput);
                 return;
             }
             if (!blank(publicRaw) && normalizedPublic == null) {
                 publicInput.setError("请输入有效的 HTTP 或 HTTPS 地址");
+                publicInput.requestFocus();
+                scrollFocusedFieldIntoView(activity, scrollView, publicInput);
                 return;
             }
             listener.onSaved(normalizedLocal == null ? "" : normalizedLocal,
@@ -116,11 +139,38 @@ public final class ServerSettingsPage {
         return scrollView;
     }
 
+    private static void keepVisibleAboveKeyboard(Activity activity, ScrollView scrollView,
+                                                 EditText input) {
+        input.setOnFocusChangeListener((view, hasFocus) -> {
+            if (hasFocus) scrollFocusedFieldIntoView(activity, scrollView, view);
+        });
+    }
+
+    private static void scrollFocusedFieldIntoView(Activity activity, ScrollView scrollView,
+                                                   View target) {
+        scrollView.postDelayed(() -> {
+            if (!target.isAttachedToWindow()) return;
+            Rect rect = new Rect();
+            target.getDrawingRect(rect);
+            scrollView.offsetDescendantRectToMyCoords(target, rect);
+            rect.bottom += dp(activity, 24);
+
+            int visibleTop = scrollView.getScrollY();
+            int visibleBottom = visibleTop + scrollView.getHeight();
+            if (rect.bottom > visibleBottom) {
+                scrollView.smoothScrollBy(0, rect.bottom - visibleBottom);
+            } else if (rect.top < visibleTop) {
+                scrollView.smoothScrollBy(0, rect.top - visibleTop);
+            }
+        }, 320L);
+    }
+
     private static EditText input(Activity activity, String hint, String value) {
         EditText input = new EditText(activity);
         input.setSingleLine(true);
         input.setHint(hint);
         input.setText(value == null ? "" : value);
+        input.setSelectAllOnFocus(false);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         input.setTextSize(16);
         input.setTextColor(UiTheme.primaryText(activity));
