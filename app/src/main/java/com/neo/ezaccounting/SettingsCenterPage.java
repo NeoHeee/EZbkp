@@ -14,6 +14,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 
 public final class SettingsCenterPage {
@@ -22,8 +23,7 @@ public final class SettingsCenterPage {
         void onClose();
         void onServerAddresses();
         void onRouteStatus();
-        void onSpeedTest();
-        void onInteractionSettings();
+        void onQuickActionsChanged(boolean enabled);
         void onSecuritySettings();
         void onCheckUpdate();
         void onWebViewInfo();
@@ -32,15 +32,15 @@ public final class SettingsCenterPage {
 
     public static final class Model {
         public final String routeSummary;
-        public final String interactionSummary;
+        public final boolean quickActionsEnabled;
         public final String securitySummary;
         public final String appVersion;
         public final String serverVersion;
 
-        public Model(String routeSummary, String interactionSummary, String securitySummary,
+        public Model(String routeSummary, boolean quickActionsEnabled, String securitySummary,
                      String appVersion, String serverVersion) {
             this.routeSummary = routeSummary;
-            this.interactionSummary = interactionSummary;
+            this.quickActionsEnabled = quickActionsEnabled;
             this.securitySummary = securitySummary;
             this.appVersion = appVersion;
             this.serverVersion = serverVersion;
@@ -72,10 +72,8 @@ public final class SettingsCenterPage {
                 listener::onServerAddresses, false);
         addRow(activity, settings, "线路状态", "当前线路与延迟",
                 listener::onRouteStatus, false);
-        addRow(activity, settings, "重新测速", null,
-                listener::onSpeedTest, false);
-        addRow(activity, settings, "快捷入口", model.interactionSummary,
-                listener::onInteractionSettings, false);
+        addSwitchRow(activity, settings, "快捷入口", model.quickActionsEnabled,
+                listener::onQuickActionsChanged, false);
         addRow(activity, settings, "应用锁", model.securitySummary,
                 listener::onSecuritySettings, false);
         addInfoRow(activity, settings, "App 版本", model.appVersion, false);
@@ -160,6 +158,49 @@ public final class SettingsCenterPage {
         }
     }
 
+    private interface BooleanChangeListener {
+        void onChanged(boolean enabled);
+    }
+
+    private static void addSwitchRow(Context context, LinearLayout card, String title,
+                                     boolean checked, BooleanChangeListener listener,
+                                     boolean last) {
+        LinearLayout row = new LinearLayout(context);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(context, 18), dp(context, 8), dp(context, 14), dp(context, 8));
+        row.setMinimumHeight(dp(context, 64));
+
+        TextView name = text(context, title, 16, UiTheme.primaryText(context), false);
+        row.addView(name, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        Switch toggle = new Switch(context);
+        toggle.setChecked(checked);
+        toggle.setShowText(false);
+        toggle.setMinWidth(dp(context, 52));
+        toggle.setMinHeight(dp(context, 48));
+        toggle.setContentDescription(title + (checked ? "已开启" : "已关闭"));
+        int[][] states = new int[][]{
+                new int[]{android.R.attr.state_checked},
+                new int[]{}
+        };
+        toggle.setTrackTintList(new ColorStateList(states, new int[]{
+                UiTheme.accent(context), UiTheme.border(context)
+        }));
+        toggle.setThumbTintList(new ColorStateList(states, new int[]{
+                UiTheme.surface(context), UiTheme.surface(context)
+        }));
+        toggle.setOnCheckedChangeListener((button, enabled) -> {
+            button.setContentDescription(title + (enabled ? "已开启" : "已关闭"));
+            listener.onChanged(enabled);
+        });
+        row.addView(toggle, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        card.addView(row, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (!last) addDivider(context, card);
+    }
+
     private static void addRow(Context context, LinearLayout card, String title,
                                String summary, Runnable action, boolean last,
                                boolean dangerous) {
@@ -214,6 +255,16 @@ public final class SettingsCenterPage {
         GradientDrawable content = new GradientDrawable();
         content.setColor(color);
         return ripple(context, content);
+    }
+
+    private static void addDivider(Context context, LinearLayout card) {
+        View divider = new View(context);
+        divider.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        divider.setBackgroundColor(UiTheme.border(context));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 1));
+        params.leftMargin = dp(context, 18);
+        card.addView(divider, params);
     }
 
     private static RippleDrawable ripple(Context context, GradientDrawable content) {

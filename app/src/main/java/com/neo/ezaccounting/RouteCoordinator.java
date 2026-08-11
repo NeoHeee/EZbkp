@@ -1,12 +1,12 @@
 package com.neo.ezaccounting;
 
 import android.content.SharedPreferences;
+import android.net.Network;
 import android.os.Handler;
 import android.os.Looper;
 
 public final class RouteCoordinator {
     public static final String KEY_LAST_ROUTE = "last_route";
-    public static final String KEY_ROUTE_MODE = "route_mode";
     public static final String KEY_LOCAL_LATENCY = "local_latency_ms";
     public static final String KEY_PUBLIC_LATENCY = "public_latency_ms";
 
@@ -31,15 +31,13 @@ public final class RouteCoordinator {
 
     public static final class Snapshot {
         public final RouteManager.Selection selection;
-        public final RouteMode mode;
         public final String activeUrl;
         public final int activeType;
         public final long checkedAt;
 
-        Snapshot(RouteManager.Selection selection, RouteMode mode, String activeUrl,
-                 int activeType, long checkedAt) {
+        Snapshot(RouteManager.Selection selection, String activeUrl, int activeType,
+                 long checkedAt) {
             this.selection = selection;
-            this.mode = mode;
             this.activeUrl = activeUrl;
             this.activeType = activeType;
             this.checkedAt = checkedAt;
@@ -75,6 +73,8 @@ public final class RouteCoordinator {
     private Snapshot lastSnapshot;
     private String lastWebVerifiedUrl;
     private long routeGeneration;
+    private long checkSequence;
+    private Network localNetwork;
 
     public RouteCoordinator(SharedPreferences preferences, Host host) {
         this(preferences, host, new RouteManager(), new RouteSwitchPolicy());
@@ -86,7 +86,6 @@ public final class RouteCoordinator {
         this.host = host;
         this.routeManager = routeManager;
         this.switchPolicy = switchPolicy;
-        preferences.edit().remove(KEY_ROUTE_MODE).apply();
     }
 
     public void setAddresses(String localUrl, String publicUrl) {
@@ -109,8 +108,7 @@ public final class RouteCoordinator {
     }
 
     public boolean activateFastStartRoute() {
-        FastStartPolicy.Candidate candidate = FastStartPolicy.select(getMode(), localUrl,
-                publicUrl, preferences.getString(KEY_LAST_ROUTE, ""));
+        FastStartPolicy.Candidate candidate = FastStartPolicy.select(localUrl, publicUrl);
         if (candidate == null) return false;
 
         long latency = candidate.type == RouteManager.TYPE_LOCAL ?
@@ -122,7 +120,7 @@ public final class RouteCoordinator {
         RouteManager.Selection selection = new RouteManager.Selection(target,
                 candidate.type == RouteManager.TYPE_LOCAL ? target : null,
                 candidate.type == RouteManager.TYPE_PUBLIC ? target : null);
-        Snapshot snapshot = new Snapshot(selection, getMode(), candidate.url, candidate.type,
+        Snapshot snapshot = new Snapshot(selection, candidate.url, candidate.type,
                 System.currentTimeMillis());
         activeUrl = candidate.url;
         activeType = candidate.type;
@@ -133,10 +131,6 @@ public final class RouteCoordinator {
         return true;
     }
 
-    public RouteMode getMode() {
-        return RouteMode.AUTO;
-    }
-
     public String getActiveUrl() {
         return activeUrl;
     }
@@ -145,8 +139,18 @@ public final class RouteCoordinator {
         return activeType;
     }
 
+    public void setLocalNetwork(Network network) {
+        long previous = localNetwork == null ? -1L : localNetwork.getNetworkHandle();
+        long next = network == null ? -1L : network.getNetworkHandle();
+        localNetwork = network;
+        if (previous != next) {
+            routeGeneration++;
+            switchPolicy.onLocalCandidateChanged();
+        }
+    }
+
     public void testLocalAddress(String url, RouteManager.ProbeCallback callback) {
-        routeManager.probeOnlyAsync(url, RouteManager.TYPE_LOCAL, callback);
+        routeManager.probeOnlyAsync(url, RouteManager.TYPE_LOCAL, localNetwork, callback);
     }
 
     public Snapshot getLastSnapshot() {
@@ -157,6 +161,12 @@ public final class RouteCoordinator {
         Trigger safeTrigger = trigger == null ? Trigger.RETRY : trigger;
         if (safeTrigger == Trigger.NETWORK_CHANGE) {
             routeGeneration++;
+        }
+        if (checkInProgress && shouldReplaceRunningCheck(safeTrigger)) {
+            checkSequence++;
+            checkInProgress = false;
+            pendingTrigger = null;
+            routeManager.cancelActiveProbes();
         }
         performCheck(safeTrigger);
     }
@@ -187,7 +197,7 @@ public final class RouteCoordinator {
             return;
         }
         if (!hasConfiguredRoute()) {
-            Snapshot empty = new Snapshot(null, getMode(), activeUrl, activeType,
+            Snapshot empty = new Snapshot(null, activeUrl, activeType,
                     System.currentTimeMillis());
             lastSnapshot = empty;
             host.onRouteUnavailable(empty, "尚未配置服务器地址", trigger);
@@ -195,11 +205,16 @@ public final class RouteCoordinator {
         }
 
         checkInProgress = true;
+        long sequence = ++checkSequence;
         long generation = routeGeneration;
         String checkedLocalUrl = localUrl;
         String checkedPublicUrl = publicUrl;
         host.onRouteCheckStarted(trigger);
-        routeManager.probeAllAsync(checkedLocalUrl, checkedPublicUrl, raw -> {
+        boolean allowCache = trigger != Trigger.MANUAL_SPEED_TEST &&
+                trigger != Trigger.PAGE_FAILURE && trigger != Trigger.RETRY;
+        routeManager.probeAllAsync(checkedLocalUrl, checkedPublicUrl, localNetwork,
+                allowCache, raw -> {
+            if (sequence != checkSequence) return;
             checkInProgress = false;
             if (generation != routeGeneration ||
                     !checkedLocalUrl.equals(localUrl) ||
@@ -207,15 +222,14 @@ public final class RouteCoordinator {
                 drainPending();
                 return;
             }
-            RouteMode mode = getMode();
             String lastRoute = preferences.getString(KEY_LAST_ROUTE, "");
 
             RouteManager.ProbeResult local = preserveWebVerification(raw.local);
             RouteManager.ProbeResult remote = preserveWebVerification(raw.publicRoute);
             boolean allowWebFallback = trigger != Trigger.MANUAL_SPEED_TEST &&
                     trigger != Trigger.PAGE_FAILURE;
-            RouteManager.ProbeResult selected = RouteManager.selectForModeWithWebFallback(
-                    mode, local, remote, lastRoute, allowWebFallback);
+            RouteManager.ProbeResult selected = RouteManager.selectWithWebFallback(
+                    local, remote, lastRoute, allowWebFallback);
 
             if (selected != null && selected.verificationPending) {
                 if (selected.type == RouteManager.TYPE_LOCAL) local = selected;
@@ -223,7 +237,7 @@ public final class RouteCoordinator {
             }
 
             RouteManager.Selection selection = new RouteManager.Selection(selected, local, remote);
-            Snapshot snapshot = new Snapshot(selection, mode, activeUrl, activeType,
+            Snapshot snapshot = new Snapshot(selection, activeUrl, activeType,
                     System.currentTimeMillis());
             lastSnapshot = snapshot;
             saveLatencies(snapshot);
@@ -280,7 +294,7 @@ public final class RouteCoordinator {
         if (activeType == RouteManager.TYPE_LOCAL) local = active;
         if (activeType == RouteManager.TYPE_PUBLIC) remote = active;
         RouteManager.Selection selection = new RouteManager.Selection(active, local, remote);
-        lastSnapshot = new Snapshot(selection, getMode(), activeUrl, activeType,
+        lastSnapshot = new Snapshot(selection, activeUrl, activeType,
                 System.currentTimeMillis());
     }
 
@@ -297,7 +311,7 @@ public final class RouteCoordinator {
             switchPolicy.blockLocalRetry(snapshot.checkedAt);
         }
         if (!target.verificationPending) switchPolicy.recordSuccess(activeType);
-        Snapshot activated = new Snapshot(snapshot.selection, snapshot.mode, activeUrl,
+        Snapshot activated = new Snapshot(snapshot.selection, activeUrl,
                 activeType, snapshot.checkedAt);
         lastSnapshot = activated;
         host.onRouteActivated(target, activated, changed, reason, trigger);
@@ -324,6 +338,11 @@ public final class RouteCoordinator {
         if ((current == Trigger.NETWORK_CHANGE || current == Trigger.BACKGROUND_STARTUP) &&
                 next == Trigger.PAGE_FAILURE) return next;
         return current;
+    }
+
+    private boolean shouldReplaceRunningCheck(Trigger trigger) {
+        return trigger == Trigger.NETWORK_CHANGE || trigger == Trigger.PAGE_FAILURE ||
+                trigger == Trigger.RETRY || trigger == Trigger.MANUAL_SPEED_TEST;
     }
 
     private void drainPending() {

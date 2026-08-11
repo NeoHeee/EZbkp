@@ -1,5 +1,6 @@
 package com.neo.ezaccounting;
 
+import android.net.Network;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -8,11 +9,17 @@ import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
 import java.net.URL;
+import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.net.ssl.SSLException;
 
@@ -23,6 +30,8 @@ public final class RouteManager {
 
     static final int LOCAL_TIMEOUT_MS = 1700;
     static final int PUBLIC_TIMEOUT_MS = 6000;
+    static final int GLOBAL_PROBE_DEADLINE_MS = 3200;
+    static final long RESULT_CACHE_MS = 12_000L;
     static final int MAX_REDIRECTS = 5;
 
     private static final String PROBE_USER_AGENT =
@@ -61,6 +70,8 @@ public final class RouteManager {
         public final String resolvedAddresses;
         public final boolean verificationPending;
         public final boolean webVerified;
+        public final int reliabilityPercent;
+        public final boolean cached;
 
         ProbeResult(String url, int type, boolean reachable, long latencyMs, int statusCode) {
             this(url, type, reachable, latencyMs, statusCode,
@@ -78,6 +89,16 @@ public final class RouteManager {
                     ErrorKind errorKind, String errorMessage, String finalUrl,
                     int redirectCount, String resolvedAddresses,
                     boolean verificationPending, boolean webVerified) {
+            this(url, type, reachable, latencyMs, statusCode, errorKind, errorMessage,
+                    finalUrl, redirectCount, resolvedAddresses, verificationPending,
+                    webVerified, reachable ? 100 : 0, false);
+        }
+
+        private ProbeResult(String url, int type, boolean reachable, long latencyMs,
+                            int statusCode, ErrorKind errorKind, String errorMessage,
+                            String finalUrl, int redirectCount, String resolvedAddresses,
+                            boolean verificationPending, boolean webVerified,
+                            int reliabilityPercent, boolean cached) {
             this.url = url;
             this.type = type;
             this.reachable = reachable;
@@ -90,6 +111,8 @@ public final class RouteManager {
             this.resolvedAddresses = resolvedAddresses == null ? "" : resolvedAddresses.trim();
             this.verificationPending = verificationPending;
             this.webVerified = webVerified;
+            this.reliabilityPercent = Math.max(0, Math.min(100, reliabilityPercent));
+            this.cached = cached;
         }
 
         public boolean isConfigured() {
@@ -134,14 +157,21 @@ public final class RouteManager {
         ProbeResult asWebVerificationCandidate() {
             return new ProbeResult(url, type, true, latencyMs, statusCode,
                     errorKind, errorMessage, finalUrl, redirectCount, resolvedAddresses,
-                    true, false);
+                    true, false, reliabilityPercent, cached);
         }
 
         ProbeResult asWebVerified(String actualUrl) {
             return new ProbeResult(url, type, true, latencyMs, statusCode,
                     errorKind, errorMessage,
                     actualUrl == null || actualUrl.trim().isEmpty() ? finalUrl : actualUrl,
-                    redirectCount, resolvedAddresses, false, true);
+                    redirectCount, resolvedAddresses, false, true,
+                    reliabilityPercent, cached);
+        }
+
+        ProbeResult withHealth(int reliabilityPercent, boolean cached) {
+            return new ProbeResult(url, type, reachable, latencyMs, statusCode,
+                    errorKind, errorMessage, finalUrl, redirectCount, resolvedAddresses,
+                    verificationPending, webVerified, reliabilityPercent, cached);
         }
 
         private String failureDetail() {
@@ -200,9 +230,41 @@ public final class RouteManager {
         }
     }
 
+    private static final class CachedProbe {
+        final ProbeResult result;
+        final long storedAt;
+
+        CachedProbe(ProbeResult result, long storedAt) {
+            this.result = result;
+            this.storedAt = storedAt;
+        }
+    }
+
+    private static final class Health {
+        int successes;
+        int failures;
+
+        synchronized int record(boolean success) {
+            if (success) successes = Math.min(8, successes + 1);
+            else failures = Math.min(8, failures + 1);
+            if (successes + failures >= 12) {
+                successes = Math.max(success ? 1 : 0, successes / 2);
+                failures = Math.max(success ? 0 : 1, failures / 2);
+            }
+            int total = successes + failures;
+            return total == 0 ? 50 : Math.round(successes * 100f / total);
+        }
+    }
+
     private final ExecutorService probes = Executors.newFixedThreadPool(2);
     private final ExecutorService coordinator = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Map<String, CachedProbe> resultCache = new ConcurrentHashMap<>();
+    private final Map<String, Health> routeHealth = new ConcurrentHashMap<>();
+    private final Set<HttpURLConnection> activeConnections =
+            Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private final AtomicLong requestGeneration = new AtomicLong();
+    private volatile Future<?> activeBatch;
 
     public void selectAsync(String localUrl, String publicUrl, String lastSuccessfulUrl,
                             Callback callback) {
@@ -214,59 +276,86 @@ public final class RouteManager {
     }
 
     public void probeAllAsync(String localUrl, String publicUrl, Callback callback) {
-        coordinator.execute(() -> {
-            CompletableFuture<ProbeResult> localFuture = CompletableFuture.supplyAsync(
-                    () -> probe(localUrl, TYPE_LOCAL, LOCAL_TIMEOUT_MS), probes);
-            CompletableFuture<ProbeResult> publicFuture = CompletableFuture.supplyAsync(
-                    () -> probe(publicUrl, TYPE_PUBLIC, PUBLIC_TIMEOUT_MS), probes);
-            ProbeResult local = localFuture.join();
-            ProbeResult publicRoute = publicFuture.join();
-            ProbeResult recommended = selectBest(local, publicRoute, null);
+        probeAllAsync(localUrl, publicUrl, null, true, callback);
+    }
+
+    public synchronized void probeAllAsync(String localUrl, String publicUrl,
+                                           Network localNetwork, boolean allowCache,
+                                           Callback callback) {
+        cancelActiveProbes();
+        long request = requestGeneration.get();
+        activeBatch = coordinator.submit(() -> {
+            long deadline = System.nanoTime() +
+                    TimeUnit.MILLISECONDS.toNanos(GLOBAL_PROBE_DEADLINE_MS);
+            Future<ProbeResult> localFuture = probes.submit(() ->
+                    probeCached(localUrl, TYPE_LOCAL, LOCAL_TIMEOUT_MS,
+                            localNetwork, allowCache));
+            Future<ProbeResult> publicFuture = probes.submit(() ->
+                    probeCached(publicUrl, TYPE_PUBLIC, PUBLIC_TIMEOUT_MS,
+                            null, allowCache));
+            ProbeResult local = await(localFuture, localUrl, TYPE_LOCAL, deadline);
+            ProbeResult publicRoute = await(publicFuture, publicUrl, TYPE_PUBLIC, deadline);
+            localFuture.cancel(true);
+            publicFuture.cancel(true);
+            disconnectActiveConnections();
+            if (request != requestGeneration.get() || Thread.currentThread().isInterrupted()) return;
+            ProbeResult recommended = selectBest(local, publicRoute, null,
+                    localNetwork != null && configured(localUrl));
             Selection result = new Selection(recommended, local, publicRoute);
-            mainHandler.post(() -> callback.onResult(result));
+            mainHandler.post(() -> {
+                if (request == requestGeneration.get()) callback.onResult(result);
+            });
         });
     }
 
     public void probeOnlyAsync(String url, int type, ProbeCallback callback) {
+        probeOnlyAsync(url, type, null, callback);
+    }
+
+    public void probeOnlyAsync(String url, int type, Network network,
+                               ProbeCallback callback) {
         int timeout = type == TYPE_LOCAL ? LOCAL_TIMEOUT_MS : PUBLIC_TIMEOUT_MS;
-        coordinator.execute(() -> {
-            ProbeResult result = probe(url, type, timeout);
+        probes.execute(() -> {
+            ProbeResult result = probeCached(url, type, timeout,
+                    type == TYPE_LOCAL ? network : null, false);
             mainHandler.post(() -> callback.onResult(result));
         });
     }
 
     static ProbeResult selectBest(ProbeResult local, ProbeResult publicRoute,
                                   String lastSuccessfulUrl) {
+        return selectBest(local, publicRoute, lastSuccessfulUrl,
+                local != null && local.isConfigured());
+    }
+
+    static ProbeResult selectBest(ProbeResult local, ProbeResult publicRoute,
+                                  String lastSuccessfulUrl, boolean localNetworkMatched) {
         boolean localOk = local != null && local.reachable;
         boolean publicOk = publicRoute != null && publicRoute.reachable;
         if (!localOk && !publicOk) return null;
         if (localOk && !publicOk) return local;
         if (!localOk) return publicRoute;
-        return local;
+        int localScore = score(local, lastSuccessfulUrl, localNetworkMatched);
+        int publicScore = score(publicRoute, lastSuccessfulUrl, false);
+        return localScore >= publicScore ? local : publicRoute;
     }
 
-    static ProbeResult selectForMode(RouteMode mode, ProbeResult local,
-                                     ProbeResult publicRoute, String lastSuccessfulUrl) {
-        RouteMode safeMode = mode == null ? RouteMode.AUTO : mode;
-        if (safeMode == RouteMode.LOCAL) return local != null && local.reachable ? local : null;
-        if (safeMode == RouteMode.PUBLIC) {
-            return publicRoute != null && publicRoute.reachable ? publicRoute : null;
-        }
-        return selectBest(local, publicRoute, lastSuccessfulUrl);
+    static int score(ProbeResult result, String lastSuccessfulUrl, boolean networkMatched) {
+        if (result == null || !result.reachable) return Integer.MIN_VALUE;
+        int score = 1000 + result.reliabilityPercent * 4;
+        if (networkMatched && result.type == TYPE_LOCAL) score += 220;
+        if (result.url != null && result.url.equals(lastSuccessfulUrl)) score += 30;
+        if (result.latencyMs > 0) score -= Math.min(350, (int) (result.latencyMs / 8));
+        return score;
     }
 
-    static ProbeResult selectForModeWithWebFallback(RouteMode mode, ProbeResult local,
-                                                     ProbeResult publicRoute,
-                                                     String lastSuccessfulUrl,
-                                                     boolean allowFallback) {
-        ProbeResult selected = selectForMode(mode, local, publicRoute, lastSuccessfulUrl);
+    static ProbeResult selectWithWebFallback(ProbeResult local, ProbeResult publicRoute,
+                                             String lastSuccessfulUrl,
+                                             boolean allowFallback) {
+        ProbeResult selected = selectBest(local, publicRoute, lastSuccessfulUrl);
         if (selected != null || !allowFallback || !eligibleForWebVerification(publicRoute)) {
             return selected;
         }
-
-        RouteMode safeMode = mode == null ? RouteMode.AUTO : mode;
-        if (safeMode == RouteMode.PUBLIC) return publicRoute.asWebVerificationCandidate();
-        if (safeMode == RouteMode.LOCAL) return null;
 
         boolean localConfigured = local != null && local.isConfigured();
         boolean localReachable = local != null && local.reachable;
@@ -283,7 +372,22 @@ public final class RouteManager {
                 result.errorKind != ErrorKind.UNCONFIGURED;
     }
 
-    private ProbeResult probe(String urlString, int type, int timeoutMs) {
+    private ProbeResult probeCached(String url, int type, int timeoutMs, Network network,
+                                    boolean allowCache) {
+        String key = cacheKey(url, type, network);
+        long now = System.currentTimeMillis();
+        CachedProbe cached = resultCache.get(key);
+        if (allowCache && cached != null && now - cached.storedAt <= RESULT_CACHE_MS) {
+            return cached.result.withHealth(cached.result.reliabilityPercent, true);
+        }
+        ProbeResult result = probe(url, type, timeoutMs, network);
+        Health health = routeHealth.computeIfAbsent(key, ignored -> new Health());
+        result = result.withHealth(health.record(result.reachable), false);
+        resultCache.put(key, new CachedProbe(result, now));
+        return result;
+    }
+
+    private ProbeResult probe(String urlString, int type, int timeoutMs, Network network) {
         if (urlString == null || urlString.trim().isEmpty()) {
             return new ProbeResult(urlString, type, false, -1L, 0,
                     ErrorKind.UNCONFIGURED, "未配置地址");
@@ -304,11 +408,13 @@ public final class RouteManager {
                             "重定向到了不受支持的协议：" + scheme,
                             0, currentUrl, redirects, resolved);
                 }
-                resolveAddresses(target, resolved);
+                resolveAddresses(target, resolved, network);
 
                 HttpURLConnection connection = null;
                 try {
-                    connection = (HttpURLConnection) target.openConnection();
+                    connection = (HttpURLConnection) (network == null ?
+                            target.openConnection() : network.openConnection(target));
+                    activeConnections.add(connection);
                     connection.setConnectTimeout(timeoutMs);
                     connection.setReadTimeout(timeoutMs);
                     connection.setInstanceFollowRedirects(false);
@@ -342,7 +448,10 @@ public final class RouteManager {
                             ok ? null : "服务器返回 HTTP " + code,
                             currentUrl, redirects, joinAddresses(resolved), false, false);
                 } finally {
-                    if (connection != null) connection.disconnect();
+                    if (connection != null) {
+                        activeConnections.remove(connection);
+                        connection.disconnect();
+                    }
                 }
             }
         } catch (SocketTimeoutException error) {
@@ -366,10 +475,12 @@ public final class RouteManager {
         }
     }
 
-    private void resolveAddresses(URL target, Set<String> resolved) throws Exception {
+    private void resolveAddresses(URL target, Set<String> resolved, Network network)
+            throws Exception {
         String host = target.getHost();
         if (host == null || host.trim().isEmpty()) return;
-        InetAddress[] addresses = InetAddress.getAllByName(host);
+        InetAddress[] addresses = network == null ? InetAddress.getAllByName(host) :
+                network.getAllByName(host);
         for (InetAddress address : addresses) {
             if (address != null && address.getHostAddress() != null) {
                 resolved.add(address.getHostAddress());
@@ -412,7 +523,49 @@ public final class RouteManager {
         return Math.max(1L, (System.nanoTime() - startedAt) / 1_000_000L);
     }
 
+    private ProbeResult await(Future<ProbeResult> future, String url, int type,
+                              long deadlineNanos) {
+        long remaining = deadlineNanos - System.nanoTime();
+        if (remaining <= 0L && !future.isDone()) return deadlineResult(url, type);
+        try {
+            return future.isDone() ? future.get() :
+                    future.get(remaining, TimeUnit.NANOSECONDS);
+        } catch (TimeoutException error) {
+            return deadlineResult(url, type);
+        } catch (Exception error) {
+            return new ProbeResult(url, type, false, -1L, 0,
+                    ErrorKind.UNKNOWN, errorSummary(error));
+        }
+    }
+
+    private ProbeResult deadlineResult(String url, int type) {
+        return new ProbeResult(url, type, false, GLOBAL_PROBE_DEADLINE_MS, 0,
+                ErrorKind.TIMEOUT, "测速达到全局截止时间");
+    }
+
+    private String cacheKey(String url, int type, Network network) {
+        long handle = network == null ? 0L : network.getNetworkHandle();
+        return type + "|" + handle + "|" + (url == null ? "" : url.trim());
+    }
+
+    private boolean configured(String url) {
+        return url != null && !url.trim().isEmpty();
+    }
+
+    public synchronized void cancelActiveProbes() {
+        requestGeneration.incrementAndGet();
+        Future<?> running = activeBatch;
+        activeBatch = null;
+        if (running != null) running.cancel(true);
+        disconnectActiveConnections();
+    }
+
+    private void disconnectActiveConnections() {
+        for (HttpURLConnection connection : activeConnections) connection.disconnect();
+    }
+
     public void shutdown() {
+        cancelActiveProbes();
         coordinator.shutdownNow();
         probes.shutdownNow();
     }

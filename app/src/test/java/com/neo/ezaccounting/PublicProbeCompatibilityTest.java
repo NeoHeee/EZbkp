@@ -18,22 +18,12 @@ public class PublicProbeCompatibilityTest {
     }
 
     @Test
-    public void forcedPublicCanUseWebViewWhenProbeReportsTlsFailure() {
-        RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL, true, 20);
-        RouteManager.ProbeResult selected = RouteManager.selectForModeWithWebFallback(
-                RouteMode.PUBLIC, local, failedPublic(RouteManager.ErrorKind.TLS), "", true);
-        assertTrue(selected.reachable);
-        assertTrue(selected.verificationPending);
-        assertEquals(RouteManager.ErrorKind.TLS, selected.errorKind);
-    }
-
-    @Test
     public void autoModeCanVerifyOnlyConfiguredPublicRoute() {
         RouteManager.ProbeResult local = new RouteManager.ProbeResult("",
                 RouteManager.TYPE_LOCAL, false, -1, 0,
                 RouteManager.ErrorKind.UNCONFIGURED, "未配置地址");
-        RouteManager.ProbeResult selected = RouteManager.selectForModeWithWebFallback(
-                RouteMode.AUTO, local, failedPublic(RouteManager.ErrorKind.TIMEOUT), "", true);
+        RouteManager.ProbeResult selected = RouteManager.selectWithWebFallback(
+                local, failedPublic(RouteManager.ErrorKind.TIMEOUT), "", true);
         assertTrue(selected.verificationPending);
         assertEquals(RouteManager.TYPE_PUBLIC, selected.type);
     }
@@ -41,8 +31,8 @@ public class PublicProbeCompatibilityTest {
     @Test
     public void autoModeCanRetryLastSuccessfulPublicRoute() {
         RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL, false, 1700);
-        RouteManager.ProbeResult selected = RouteManager.selectForModeWithWebFallback(
-                RouteMode.AUTO, local, failedPublic(RouteManager.ErrorKind.TLS),
+        RouteManager.ProbeResult selected = RouteManager.selectWithWebFallback(
+                local, failedPublic(RouteManager.ErrorKind.TLS),
                 "https://remote", true);
         assertTrue(selected.verificationPending);
     }
@@ -50,8 +40,8 @@ public class PublicProbeCompatibilityTest {
     @Test
     public void reachableLocalStillWinsOverUncertainPublicRoute() {
         RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL, true, 80);
-        RouteManager.ProbeResult selected = RouteManager.selectForModeWithWebFallback(
-                RouteMode.AUTO, local, failedPublic(RouteManager.ErrorKind.TLS),
+        RouteManager.ProbeResult selected = RouteManager.selectWithWebFallback(
+                local, failedPublic(RouteManager.ErrorKind.TLS),
                 "https://remote", true);
         assertEquals(local, selected);
         assertFalse(selected.verificationPending);
@@ -59,8 +49,8 @@ public class PublicProbeCompatibilityTest {
 
     @Test
     public void pageFailureDisablesAutomaticWebFallback() {
-        RouteManager.ProbeResult selected = RouteManager.selectForModeWithWebFallback(
-                RouteMode.PUBLIC, null, failedPublic(RouteManager.ErrorKind.TLS), "", false);
+        RouteManager.ProbeResult selected = RouteManager.selectWithWebFallback(
+                null, failedPublic(RouteManager.ErrorKind.TLS), "", false);
         assertNull(selected);
     }
 

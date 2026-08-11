@@ -19,7 +19,7 @@ public final class WifiRouteContext {
         return currentWifiNetwork(context) != null;
     }
 
-    private static Network currentWifiNetwork(Context context) {
+    public static Network currentWifiNetwork(Context context) {
         ConnectivityManager manager = (ConnectivityManager)
                 context.getSystemService(Context.CONNECTIVITY_SERVICE);
         if (manager == null) return null;

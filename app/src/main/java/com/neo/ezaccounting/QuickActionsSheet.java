@@ -32,19 +32,16 @@ public final class QuickActionsSheet {
     private static CachedSheet cachedSheet;
     public interface Listener {
         void onHome();
-        void onSpeedTest();
         void onSettings();
         void onLock();
     }
 
     public static final class Model {
-        public final String mode;
         public final String route;
         public final String latency;
         public final String security;
 
-        public Model(String mode, String route, String latency, String security) {
-            this.mode = safe(mode, "自动选择");
+        public Model(String route, String latency, String security) {
             this.route = safe(route, "未选择线路");
             this.latency = safe(latency, "待测速");
             this.security = safe(security, "未开启保护");
@@ -75,25 +72,59 @@ public final class QuickActionsSheet {
         TextView route;
         TextView latency;
         TextView security;
+        View panel;
         Listener listener;
+        boolean prewarming;
 
         CachedSheet(Activity activity) {
             this.activity = activity;
         }
 
         void show(Model model, Listener nextListener) {
+            prewarming = false;
             listener = nextListener;
             route.setText(model.route);
             latency.setText(model.latency);
             security.setText(model.security);
-            if (!dialog.isShowing()) dialog.show();
+            restoreVisibleWindow(activity, dialog);
+            dialog.show();
+            animateIn(panel);
+        }
+
+        void prewarm() {
+            if (dialog == null || dialog.isShowing()) return;
+            prewarming = true;
+            configureHiddenWindow(dialog);
+            dialog.show();
+            View decor = dialog.getWindow() == null ? null : dialog.getWindow().getDecorView();
+            if (decor == null) {
+                prewarming = false;
+                dialog.hide();
+                configureHiddenWindow(dialog);
+                return;
+            }
+            decor.postOnAnimation(() -> decor.postOnAnimation(() -> {
+                if (!prewarming) return;
+                prewarming = false;
+                dialog.hide();
+                configureHiddenWindow(dialog);
+            }));
+        }
+
+        void hide() {
+            prewarming = false;
+            if (dialog != null) {
+                dialog.hide();
+                configureHiddenWindow(dialog);
+            }
         }
 
         void release() {
+            prewarming = false;
             listener = null;
             if (dialog != null) {
                 dialog.setOnShowListener(null);
-                if (dialog.isShowing()) dialog.dismiss();
+                dialog.dismiss();
             }
         }
     }
@@ -110,6 +141,17 @@ public final class QuickActionsSheet {
         cachedSheet.show(model, listener);
     }
 
+    public static void prewarm(Activity activity, Model model) {
+        if (activity == null || activity.isFinishing() || activity.isDestroyed() || model == null) {
+            return;
+        }
+        if (cachedSheet == null || cachedSheet.activity != activity) {
+            release(cachedSheet == null ? null : cachedSheet.activity);
+            cachedSheet = create(activity, model);
+        }
+        cachedSheet.prewarm();
+    }
+
     public static void release(Activity activity) {
         if (cachedSheet == null || (activity != null && cachedSheet.activity != activity)) return;
         cachedSheet.release();
@@ -122,8 +164,16 @@ public final class QuickActionsSheet {
         Dialog dialog = new Dialog(activity);
         sheet.dialog = dialog;
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        dialog.setCancelable(true);
+        dialog.setCancelable(false);
         dialog.setCanceledOnTouchOutside(false);
+        dialog.setOnKeyListener((ignored, keyCode, event) -> {
+            if (keyCode == android.view.KeyEvent.KEYCODE_BACK &&
+                    event.getAction() == android.view.KeyEvent.ACTION_UP) {
+                sheet.hide();
+                return true;
+            }
+            return false;
+        });
 
         FrameLayout overlay = new FrameLayout(activity);
         overlay.setPadding(dp(activity, 8), dp(activity, 12), dp(activity, 8),
@@ -131,7 +181,7 @@ public final class QuickActionsSheet {
         overlay.setClickable(true);
         overlay.setFocusable(true);
         overlay.setContentDescription("快捷功能遮罩，点击空白区域关闭");
-        overlay.setOnClickListener(view -> dialog.dismiss());
+        overlay.setOnClickListener(view -> sheet.hide());
 
         LinearLayout panel = new LinearLayout(activity);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -144,8 +194,9 @@ public final class QuickActionsSheet {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             panel.setElevation(dp(activity, 12));
         }
+        sheet.panel = panel;
 
-        panel.addView(createHeader(activity, dialog));
+        panel.addView(createHeader(activity, sheet));
         panel.addView(createStatusDashboard(activity, model));
         sheet.route = panel.findViewWithTag(TAG_ROUTE_VALUE);
         sheet.latency = panel.findViewWithTag(TAG_LATENCY_VALUE);
@@ -176,7 +227,7 @@ public final class QuickActionsSheet {
                         "设置中心", "查看全部设置与维护工具", () -> {
                             if (sheet.listener != null) sheet.listener.onSettings();
                         })
-        ), dialog);
+        ), sheet);
 
         panel.addView(content, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -196,14 +247,10 @@ public final class QuickActionsSheet {
         overlay.addView(panel, panelParams);
 
         dialog.setContentView(overlay);
-        dialog.setOnShowListener(ignored -> {
-            configureWindow(activity, dialog);
-            animateIn(panel);
-        });
         return sheet;
     }
 
-    private static View createHeader(Context context, Dialog dialog) {
+    private static View createHeader(Context context, CachedSheet sheet) {
         LinearLayout row = new LinearLayout(context);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(context, 2), 0, 0, dp(context, 8));
@@ -224,7 +271,7 @@ public final class QuickActionsSheet {
         close.setGravity(Gravity.CENTER);
         close.setContentDescription("关闭快捷中心");
         close.setBackground(ripple(context, circleBackground(context)));
-        close.setOnClickListener(view -> dialog.dismiss());
+        close.setOnClickListener(view -> sheet.hide());
         row.addView(close, new LinearLayout.LayoutParams(dp(context, 42), dp(context, 42)));
         return row;
     }
@@ -298,7 +345,7 @@ public final class QuickActionsSheet {
     }
 
     private static void addActionRow(Context context, LinearLayout parent,
-                                     List<ActionItem> items, Dialog dialog) {
+                                     List<ActionItem> items, CachedSheet sheet) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.TOP);
@@ -307,13 +354,14 @@ public final class QuickActionsSheet {
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
             if (index > 0) params.leftMargin = dp(context, 3);
             if (index < items.size() - 1) params.rightMargin = dp(context, 3);
-            row.addView(createCompactAction(context, items.get(index), dialog), params);
+            row.addView(createCompactAction(context, items.get(index), sheet), params);
         }
         parent.addView(row, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
     }
 
-    private static View createCompactAction(Context context, ActionItem item, Dialog dialog) {
+    private static View createCompactAction(Context context, ActionItem item,
+                                            CachedSheet sheet) {
         LinearLayout tile = new LinearLayout(context);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -324,7 +372,7 @@ public final class QuickActionsSheet {
         tile.setBackground(ripple(context, tileBackground(context)));
         tile.setContentDescription(item.title + "，" + item.description);
         tile.setOnClickListener(view -> {
-            dialog.dismiss();
+            sheet.hide();
             item.action.run();
         });
 
@@ -361,6 +409,42 @@ public final class QuickActionsSheet {
                 WindowManager.LayoutParams.MATCH_PARENT);
         window.setNavigationBarColor(UiTheme.background(activity));
         window.setStatusBarColor(UiTheme.background(activity));
+    }
+
+    private static void restoreVisibleWindow(Activity activity, Dialog dialog) {
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
+        }
+        configureWindow(activity, dialog);
+        setWindowComposition(dialog, 1f, UiTheme.isDark(activity) ? 0.58f : 0.46f);
+    }
+
+    private static void configureHiddenWindow(Dialog dialog) {
+        Window window = dialog.getWindow();
+        if (window == null) return;
+        window.setBackgroundDrawableResource(android.R.color.transparent);
+        window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
+        window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        WindowManager.LayoutParams attributes = window.getAttributes();
+        attributes.alpha = 0f;
+        attributes.dimAmount = 0f;
+        attributes.width = WindowManager.LayoutParams.MATCH_PARENT;
+        attributes.height = WindowManager.LayoutParams.MATCH_PARENT;
+        window.setAttributes(attributes);
+        window.setLayout(WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT);
+    }
+
+    private static void setWindowComposition(Dialog dialog, float alpha, float dimAmount) {
+        Window window = dialog.getWindow();
+        if (window == null) return;
+        WindowManager.LayoutParams attributes = window.getAttributes();
+        attributes.alpha = alpha;
+        attributes.dimAmount = dimAmount;
+        window.setAttributes(attributes);
     }
 
     private static void animateIn(View panel) {

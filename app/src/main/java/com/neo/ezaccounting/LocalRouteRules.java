@@ -60,7 +60,7 @@ public final class LocalRouteRules {
 
     public static LocalRouteRule selectRule(List<LocalRouteRule> rules, String currentSsid,
                                              boolean wifiConnected) {
-        if (rules == null || rules.isEmpty()) return null;
+        if (rules == null || rules.isEmpty() || !wifiConnected) return null;
         String normalizedSsid = currentSsid == null ? "" : currentSsid.trim();
         if (wifiConnected && !normalizedSsid.isEmpty()) {
             for (LocalRouteRule rule : rules) {
