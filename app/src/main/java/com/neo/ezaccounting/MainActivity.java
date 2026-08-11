@@ -42,6 +42,7 @@ public class MainActivity extends FragmentActivity implements
     private static final String KEY_LOCAL_URL = "local_url";
     private static final String KEY_PUBLIC_URL = "public_url";
     private static final String KEY_LAST_UPDATE_CHECK = "last_update_check";
+    private static final String KEY_SHOW_QUICK_ACTIONS = "show_quick_actions";
     private static final String STATE_KEY = "app_state";
     private static final String WEB_URL_KEY = "web_url";
     private static final String BASE_URL_KEY = "base_url";
@@ -67,6 +68,7 @@ public class MainActivity extends FragmentActivity implements
     private TextView recoveryBanner;
     private TextView quickActionsButton;
     private Bundle pendingWebViewState;
+    private boolean quickActionsEnabled = true;
 
     private final Runnable backgroundStartupProbe = this::runPendingBackgroundStartupProbe;
     private final Runnable progressivePageRetry = this::runProgressivePageRetry;
@@ -140,6 +142,8 @@ public class MainActivity extends FragmentActivity implements
         preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
         localUrl = preferences.getString(KEY_LOCAL_URL, "");
         publicUrl = preferences.getString(KEY_PUBLIC_URL, "");
+        quickActionsEnabled = preferences.getBoolean(KEY_SHOW_QUICK_ACTIONS, true);
+        updateQuickActionsVisibility();
         pendingShortcutAction = ShortcutActions.read(getIntent());
         lastWebUrl = savedInstanceState == null ? null :
                 savedInstanceState.getString(WEB_URL_KEY);
@@ -245,8 +249,7 @@ public class MainActivity extends FragmentActivity implements
     private void hideOverlay() {
         overlayLayer.removeAllViews();
         overlayLayer.setVisibility(View.GONE);
-        quickActionsButton.setVisibility(View.VISIBLE);
-        quickActionsButton.bringToFront();
+        updateQuickActionsVisibility();
     }
 
     private void showRecoveryBanner(String text) {
@@ -268,10 +271,16 @@ public class MainActivity extends FragmentActivity implements
         recoveryBanner.setVisibility(View.GONE);
         recoveryBanner.setAlpha(1f);
         recoveryBanner.setTranslationY(0f);
-        if (overlayLayer.getVisibility() != View.VISIBLE) {
-            quickActionsButton.setVisibility(View.VISIBLE);
-            quickActionsButton.bringToFront();
-        }
+        updateQuickActionsVisibility();
+    }
+
+    private void updateQuickActionsVisibility() {
+        if (quickActionsButton == null || overlayLayer == null || recoveryBanner == null) return;
+        boolean visible = quickActionsEnabled &&
+                overlayLayer.getVisibility() != View.VISIBLE &&
+                recoveryBanner.getVisibility() != View.VISIBLE;
+        quickActionsButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (visible) quickActionsButton.bringToFront();
     }
 
     private void runProgressivePageRetry() {
@@ -372,9 +381,17 @@ public class MainActivity extends FragmentActivity implements
             }
         } else if (ShortcutActions.LOCK.equals(action)) {
             lockImmediately();
-        } else if (ShortcutActions.UPDATE.equals(action)) {
-            checkForUpdates(true);
+        } else if (ShortcutActions.TOGGLE_QUICK_ACTIONS.equals(action)) {
+            toggleQuickActions();
         }
+    }
+
+    private void toggleQuickActions() {
+        quickActionsEnabled = !quickActionsEnabled;
+        preferences.edit().putBoolean(KEY_SHOW_QUICK_ACTIONS, quickActionsEnabled).apply();
+        updateQuickActionsVisibility();
+        Toast.makeText(this, quickActionsEnabled ?
+                "快捷入口已显示" : "快捷入口已隐藏", Toast.LENGTH_SHORT).show();
     }
 
     private void requestAppUnlock() {
@@ -416,12 +433,14 @@ public class MainActivity extends FragmentActivity implements
         stateBeforeSettings = stateMachine.getState();
         transitionTo(AppStateMachine.State.SETTINGS);
         showOverlay(ServerSettingsPage.create(this, localUrl, publicUrl,
-                (savedLocal, savedPublic) -> {
+                quickActionsEnabled, (savedLocal, savedPublic, showQuickActions) -> {
                     localUrl = savedLocal;
                     publicUrl = savedPublic;
+                    quickActionsEnabled = showQuickActions;
                     preferences.edit()
                             .putString(KEY_LOCAL_URL, localUrl)
                             .putString(KEY_PUBLIC_URL, publicUrl)
+                            .putBoolean(KEY_SHOW_QUICK_ACTIONS, quickActionsEnabled)
                             .apply();
                     routeCoordinator.setAddresses(localUrl, publicUrl);
                     serverSettingsVisible = false;

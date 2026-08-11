@@ -34,13 +34,13 @@
             android:targetClass="com.neo.ezaccounting.UnifiedMainActivity" />
     </shortcut>
     <shortcut
-        android:shortcutId="update"
+        android:shortcutId="quick_actions"
         android:enabled="true"
         android:icon="@drawable/ic_launcher"
-        android:shortcutShortLabel="@string/shortcut_update_short"
-        android:shortcutLongLabel="@string/shortcut_update_long">
+        android:shortcutShortLabel="@string/shortcut_quick_actions_short"
+        android:shortcutLongLabel="@string/shortcut_quick_actions_long">
         <intent
-            android:action="com.neo.ezaccounting.action.UPDATE"
+            android:action="com.neo.ezaccounting.action.TOGGLE_QUICK_ACTIONS"
             android:targetPackage="com.neo.ezaccounting"
             android:targetClass="com.neo.ezaccounting.UnifiedMainActivity" />
     </shortcut>

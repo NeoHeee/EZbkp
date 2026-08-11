@@ -17,11 +17,12 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 
 public final class ServerSettingsPage {
     public interface Listener {
-        void onSaved(String localUrl, String publicUrl);
+        void onSaved(String localUrl, String publicUrl, boolean showQuickActions);
     }
 
     private static final class ImeState {
@@ -31,7 +32,7 @@ public final class ServerSettingsPage {
     private ServerSettingsPage() {}
 
     public static View create(Activity activity, String localUrl, String publicUrl,
-                              Listener listener) {
+                              boolean showQuickActions, Listener listener) {
         ScrollView scrollView = new ScrollView(activity);
         scrollView.setFillViewport(true);
         scrollView.setClipToPadding(false);
@@ -79,6 +80,20 @@ public final class ServerSettingsPage {
         EditText publicInput = input(activity, "https://money.example.com", publicUrl);
         publicInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
         content.addView(publicInput, fullWrap(activity, 18));
+
+        Switch quickActionsSwitch = new Switch(activity);
+        quickActionsSwitch.setText("显示快捷入口");
+        quickActionsSwitch.setTextSize(15);
+        quickActionsSwitch.setTextColor(UiTheme.primaryText(activity));
+        quickActionsSwitch.setChecked(showQuickActions);
+        quickActionsSwitch.setGravity(Gravity.CENTER_VERTICAL);
+        quickActionsSwitch.setMinHeight(dp(activity, 56));
+        quickActionsSwitch.setContentDescription("控制记账页面右侧的快捷中心入口是否显示");
+        content.addView(quickActionsSwitch, fullWrap(activity, 4));
+        TextView quickActionsHint = text(activity,
+                "关闭后仍可在记账页面双指快速双击，重新打开快捷中心。",
+                12.5f, UiTheme.tertiaryText(activity), false);
+        content.addView(quickActionsHint, fullWrap(activity, 18));
 
         Button save = new Button(activity);
         save.setText("保存并连接");
@@ -144,7 +159,8 @@ public final class ServerSettingsPage {
                 return;
             }
             listener.onSaved(normalizedLocal == null ? "" : normalizedLocal,
-                    normalizedPublic == null ? "" : normalizedPublic);
+                    normalizedPublic == null ? "" : normalizedPublic,
+                    quickActionsSwitch.isChecked());
         });
         return scrollView;
     }
