@@ -2,9 +2,7 @@ package com.neo.ezaccounting;
 
 public final class RouteSwitchPolicy {
     static final int FAILURE_THRESHOLD = 2;
-    static final long SWITCH_COOLDOWN_MS = 60_000L;
-    static final long MIN_LATENCY_GAIN_MS = 150L;
-    static final double REQUIRED_LATENCY_RATIO = 0.70d;
+    static final long LOCAL_RETRY_HOLD_MS = 10_000L;
 
     public static final class Decision {
         public final boolean shouldSwitch;
@@ -28,7 +26,7 @@ public final class RouteSwitchPolicy {
 
     private int localFailures;
     private int publicFailures;
-    private long lastSwitchAt;
+    private long localRetryAfter;
 
     public void recordFailure(int routeType) {
         if (routeType == RouteManager.TYPE_LOCAL) localFailures++;
@@ -47,13 +45,21 @@ public final class RouteSwitchPolicy {
     }
 
     public void recordSwitch(long now) {
-        lastSwitchAt = now;
         localFailures = 0;
         publicFailures = 0;
     }
 
+    public void blockLocalRetry(long now) {
+        localRetryAfter = now + LOCAL_RETRY_HOLD_MS;
+    }
+
+    public void onLocalCandidateChanged() {
+        localRetryAfter = 0L;
+        localFailures = 0;
+    }
+
     public Decision evaluate(int activeType, RouteManager.Selection selection, long now,
-                             boolean allowPerformanceSwitch) {
+                             boolean activeRouteEligible) {
         if (selection == null || !selection.hasRoute()) return Decision.stay("没有可用线路");
         RouteManager.ProbeResult recommended = selection.selected;
         if (activeType == RouteManager.TYPE_NONE) {
@@ -63,6 +69,10 @@ public final class RouteSwitchPolicy {
         RouteManager.ProbeResult current = resultFor(activeType, selection);
         RouteManager.ProbeResult alternate = alternateFor(activeType, selection);
         int failures = failureCount(activeType);
+
+        if (!activeRouteEligible && recommended.type != activeType) {
+            return Decision.switchTo(recommended, "当前网络已不再匹配原线路");
+        }
 
         if (failures >= FAILURE_THRESHOLD && alternate != null && alternate.reachable) {
             return Decision.switchTo(alternate, "当前页面连续加载失败" + failures + "次");
@@ -82,19 +92,13 @@ public final class RouteSwitchPolicy {
                     "线路探测恢复，但页面失败计数仍保留" : "当前线路仍为最佳选择");
         }
 
-        if (!allowPerformanceSwitch) return Decision.stay("仅测速，不自动切换");
-        if (lastSwitchAt > 0L && now - lastSwitchAt < SWITCH_COOLDOWN_MS) {
-            return Decision.stay("处于线路切换冷却期");
+        if (recommended.type == RouteManager.TYPE_LOCAL) {
+            if (now < localRetryAfter) {
+                return Decision.stay("局域网刚刚失败，短暂保持公网避免来回切换");
+            }
+            return Decision.switchTo(recommended, "当前 Wi-Fi 命中局域网地址");
         }
-
-        long gain = current.latencyMs - recommended.latencyMs;
-        boolean clearlyFaster = current.latencyMs > 0L && recommended.latencyMs > 0L &&
-                gain >= MIN_LATENCY_GAIN_MS &&
-                recommended.latencyMs <= Math.round(current.latencyMs * REQUIRED_LATENCY_RATIO);
-        if (clearlyFaster) {
-            return Decision.switchTo(recommended, "候选线路延迟明显更低");
-        }
-        return Decision.stay("延迟差异不足以触发切换");
+        return Decision.stay("当前线路可用，不因测速结果主动切换");
     }
 
     private RouteManager.ProbeResult resultFor(int type, RouteManager.Selection selection) {

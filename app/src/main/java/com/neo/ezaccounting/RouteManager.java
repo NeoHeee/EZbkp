@@ -25,8 +25,6 @@ public final class RouteManager {
     static final int PUBLIC_TIMEOUT_MS = 6000;
     static final int MAX_REDIRECTS = 5;
 
-    private static final long LOCAL_TOLERANCE_MS = 250L;
-    private static final long LAST_ROUTE_TOLERANCE_MS = 180L;
     private static final String PROBE_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/120 Mobile Safari/537.36 EZAccounting/1.5.10";
@@ -244,28 +242,7 @@ public final class RouteManager {
         if (!localOk && !publicOk) return null;
         if (localOk && !publicOk) return local;
         if (!localOk) return publicRoute;
-
-        if (lastSuccessfulUrl != null && !lastSuccessfulUrl.trim().isEmpty()) {
-            if (lastSuccessfulUrl.equals(local.url) && local.webVerified) return local;
-            if (lastSuccessfulUrl.equals(publicRoute.url) && publicRoute.webVerified) {
-                return publicRoute;
-            }
-            if (lastSuccessfulUrl.equals(local.url) &&
-                    comparableLatency(local) <= comparableLatency(publicRoute) +
-                            LAST_ROUTE_TOLERANCE_MS) {
-                return local;
-            }
-            if (lastSuccessfulUrl.equals(publicRoute.url) &&
-                    comparableLatency(publicRoute) <= comparableLatency(local) +
-                            LAST_ROUTE_TOLERANCE_MS) {
-                return publicRoute;
-            }
-        }
-
-        if (comparableLatency(local) <= comparableLatency(publicRoute) + LOCAL_TOLERANCE_MS) {
-            return local;
-        }
-        return publicRoute;
+        return local;
     }
 
     static ProbeResult selectForMode(RouteMode mode, ProbeResult local,
@@ -304,10 +281,6 @@ public final class RouteManager {
     private static boolean eligibleForWebVerification(ProbeResult result) {
         return result != null && result.isConfigured() && !result.reachable &&
                 result.errorKind != ErrorKind.UNCONFIGURED;
-    }
-
-    private static long comparableLatency(ProbeResult result) {
-        return result == null || result.latencyMs <= 0 ? Long.MAX_VALUE / 4 : result.latencyMs;
     }
 
     private ProbeResult probe(String urlString, int type, int timeoutMs) {

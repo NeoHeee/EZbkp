@@ -29,7 +29,6 @@ import java.util.List;
 public final class QuickActionsSheet {
     public interface Listener {
         void onHome();
-        void onManualRoute();
         void onSpeedTest();
         void onSettings();
         void onLock();
@@ -120,8 +119,6 @@ public final class QuickActionsSheet {
                                     refreshed ? "正在刷新当前页面" : "当前页面尚未加载",
                                     Toast.LENGTH_SHORT).show();
                         }),
-                new ActionItem(android.R.drawable.ic_menu_rotate,
-                        "切换线路", "自动、本地或公网", listener::onManualRoute),
                 new ActionItem(android.R.drawable.ic_menu_recent_history,
                         "重新测速", "检测两条线路速度", listener::onSpeedTest),
                 new ActionItem(android.R.drawable.ic_lock_lock,
@@ -197,7 +194,7 @@ public final class QuickActionsSheet {
         LinearLayout firstRow = new LinearLayout(context);
         firstRow.setOrientation(LinearLayout.HORIZONTAL);
         firstRow.setPadding(0, dp(context, 9), 0, 0);
-        firstRow.addView(statusCell(context, "线路模式", model.mode),
+        firstRow.addView(statusCell(context, "选择方式", model.mode),
                 weightedCellParams(context, true));
         firstRow.addView(statusCell(context, "当前线路", model.route),
                 weightedCellParams(context, false));

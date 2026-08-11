@@ -531,7 +531,7 @@ public class MainActivity extends FragmentActivity implements
         serverSettingsVisible = true;
         stateBeforeSettings = stateMachine.getState();
         transitionTo(AppStateMachine.State.SETTINGS);
-        String routeSummary = routeCoordinator.getMode().label() + " · " +
+        String routeSummary = "自动管理 · " +
                 routeName(routeCoordinator.getActiveType());
         SettingsCenterPage.Model model = new SettingsCenterPage.Model(
                 routeSummary,
@@ -555,11 +555,6 @@ public class MainActivity extends FragmentActivity implements
             @Override
             public void onRouteStatus() {
                 showRouteStatusDialog();
-            }
-
-            @Override
-            public void onRouteMode() {
-                showManualRouteDialog();
             }
 
             @Override
@@ -704,8 +699,7 @@ public class MainActivity extends FragmentActivity implements
             transitionTo(AppStateMachine.State.LOADING_WEB);
             webViewController.loadUrl(targetUrl);
         } else if (trigger == RouteCoordinator.Trigger.RETRY ||
-                trigger == RouteCoordinator.Trigger.PAGE_FAILURE ||
-                trigger == RouteCoordinator.Trigger.MANUAL_MODE_CHANGE) {
+                trigger == RouteCoordinator.Trigger.PAGE_FAILURE) {
             transitionTo(AppStateMachine.State.LOADING_WEB);
             hideOverlay();
             webViewController.reload();
@@ -857,7 +851,7 @@ public class MainActivity extends FragmentActivity implements
                 failure.detail + (reason == null || reason.isEmpty() ? "" : "\n" + reason);
         String browserUrl = browserTarget();
         ErrorRecoveryPage.Model model = new ErrorRecoveryPage.Model(title,
-                "可以重新连接、手动测速或明确切换线路。自动模式不会因一次波动立即跳线。",
+                "可以重新连接、手动测速或修改服务器地址。线路会根据当前网络自动选择。",
                 detail, snapshot, browserUrl != null);
         showOverlay(ErrorRecoveryPage.create(this, model, this));
     }
@@ -870,21 +864,6 @@ public class MainActivity extends FragmentActivity implements
     @Override
     public void onSpeedTest() {
         routeCoordinator.manualSpeedTest();
-    }
-
-    @Override
-    public void onSwitchLocal() {
-        routeCoordinator.setMode(RouteMode.LOCAL);
-    }
-
-    @Override
-    public void onSwitchPublic() {
-        routeCoordinator.setMode(RouteMode.PUBLIC);
-    }
-
-    @Override
-    public void onUseAutomaticMode() {
-        routeCoordinator.setMode(RouteMode.AUTO);
     }
 
     @Override
@@ -910,11 +889,6 @@ public class MainActivity extends FragmentActivity implements
                 if (routeCoordinator.getActiveUrl() != null) {
                     webViewController.loadUrl(routeCoordinator.getActiveUrl());
                 }
-            }
-
-            @Override
-            public void onManualRoute() {
-                showManualRouteDialog();
             }
 
             @Override
@@ -947,7 +921,7 @@ public class MainActivity extends FragmentActivity implements
         }
         String security = AppSecurity.isEnabled(this) ?
                 AppSecurity.getModeLabel(this) : "未开启保护";
-        return new QuickActionsSheet.Model(routeCoordinator.getMode().label(),
+        return new QuickActionsSheet.Model("自动管理",
                 routeName(routeCoordinator.getActiveType()), latency, security);
     }
 
@@ -957,7 +931,6 @@ public class MainActivity extends FragmentActivity implements
                 .setTitle("线路状态")
                 .setMessage(routeStatusText(snapshot))
                 .setNegativeButton("关闭", null)
-                .setNeutralButton("切换线路", (dialog, which) -> showManualRouteDialog())
                 .setPositiveButton("手动测速", (dialog, which) -> routeCoordinator.manualSpeedTest())
                 .create());
     }
@@ -967,13 +940,13 @@ public class MainActivity extends FragmentActivity implements
                 .setTitle("测速完成")
                 .setMessage(routeStatusText(snapshot))
                 .setNegativeButton("关闭", null)
-                .setPositiveButton("切换线路", (dialog, which) -> showManualRouteDialog())
+                .setPositiveButton("再次测速", (dialog, which) -> routeCoordinator.manualSpeedTest())
                 .create());
     }
 
     private String routeStatusText(RouteCoordinator.Snapshot snapshot) {
         StringBuilder text = new StringBuilder();
-        text.append("模式：").append(routeCoordinator.getMode().label()).append('\n');
+        text.append("选择方式：自动管理\n");
         text.append("当前：").append(routeName(routeCoordinator.getActiveType())).append('\n');
         if (snapshot == null) {
             text.append("\n尚未完成测速");
@@ -981,29 +954,12 @@ public class MainActivity extends FragmentActivity implements
         }
         text.append("\n本地：").append(probeLabel(snapshot.local()));
         text.append("\n公网：").append(probeLabel(snapshot.publicRoute()));
-        text.append("\n\n自动切换规则：连续失败2次；切换后冷却60秒；仅在候选线路明显更快时因性能切换。");
+        text.append("\n\n自动规则：当前 Wi-Fi 命中时优先局域网；本地不可用时回退公网；网络变化后自动重新选择。");
         return text.toString();
     }
 
     private String probeLabel(RouteManager.ProbeResult result) {
         return result == null ? "未检测" : result.label() + " · " + result.diagnostic();
-    }
-
-    private void showManualRouteDialog() {
-        RouteMode current = routeCoordinator.getMode();
-        String[] labels = {"自动选择", "固定本地线路", "固定公网线路"};
-        RouteMode[] modes = {RouteMode.AUTO, RouteMode.LOCAL, RouteMode.PUBLIC};
-        int checked = current == RouteMode.LOCAL ? 1 : current == RouteMode.PUBLIC ? 2 : 0;
-        UiComponents.show(new AlertDialog.Builder(this)
-                .setTitle("手动切换线路")
-                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
-                    dialog.dismiss();
-                    routeCoordinator.setMode(modes[which]);
-                    Toast.makeText(this, "线路模式已设为：" + modes[which].label(),
-                            Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton("取消", null)
-                .create());
     }
 
     private void lockImmediately() {

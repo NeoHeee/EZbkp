@@ -21,7 +21,6 @@ public final class SettingsCenterPage {
         void onClose();
         void onServerAddresses();
         void onRouteStatus();
-        void onRouteMode();
         void onSpeedTest();
         void onInteractionSettings();
         void onSecuritySettings();
@@ -73,8 +72,6 @@ public final class SettingsCenterPage {
                 listener::onServerAddresses, false);
         addRow(activity, connection, "线路状态", "查看当前线路、延迟与可用性",
                 listener::onRouteStatus, false);
-        addRow(activity, connection, "线路模式", "自动选择、本地线路或公网线路",
-                listener::onRouteMode, false);
         addRow(activity, connection, "重新测速", "检测两条线路的连接速度",
                 listener::onSpeedTest, true);
         content.addView(connection, fullWidth(activity, 24));

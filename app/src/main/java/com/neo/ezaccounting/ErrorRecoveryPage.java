@@ -15,9 +15,6 @@ public final class ErrorRecoveryPage {
     public interface Listener {
         void onRetry();
         void onSpeedTest();
-        void onSwitchLocal();
-        void onSwitchPublic();
-        void onUseAutomaticMode();
         void onEditAddresses();
         void onOpenBrowser();
     }
@@ -96,24 +93,10 @@ public final class ErrorRecoveryPage {
         speed.setOnClickListener(v -> listener.onSpeedTest());
         root.addView(speed, buttonParams(activity, 14));
 
-        LinearLayout switchRow = new LinearLayout(activity);
-        switchRow.setOrientation(LinearLayout.HORIZONTAL);
-        switchRow.setWeightSum(2f);
-        Button local = secondaryButton(activity, "切换本地");
-        Button remote = secondaryButton(activity, "切换公网");
-        local.setOnClickListener(v -> listener.onSwitchLocal());
-        remote.setOnClickListener(v -> listener.onSwitchPublic());
         LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, dp(activity, 50), 1f);
         left.rightMargin = dp(activity, 6);
         LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, dp(activity, 50), 1f);
         right.leftMargin = dp(activity, 6);
-        switchRow.addView(local, left);
-        switchRow.addView(remote, right);
-        root.addView(switchRow, fullWrap(activity, 12));
-
-        Button automatic = secondaryButton(activity, "恢复自动选择线路");
-        automatic.setOnClickListener(v -> listener.onUseAutomaticMode());
-        root.addView(automatic, buttonParams(activity, 12));
 
         LinearLayout toolsRow = new LinearLayout(activity);
         toolsRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -141,7 +124,7 @@ public final class ErrorRecoveryPage {
             text.append("线路状态：尚未完成测速");
             return text.toString();
         }
-        text.append("线路模式：").append(snapshot.mode.label()).append('\n');
+        text.append("选择方式：自动管理\n");
         text.append("本地线路：").append(label(snapshot.local())).append('\n');
         text.append("公网线路：").append(label(snapshot.publicRoute()));
         return text.toString();
