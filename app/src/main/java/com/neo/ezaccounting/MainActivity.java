@@ -185,25 +185,28 @@ public class MainActivity extends FragmentActivity implements
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         quickActionsButton = new TextView(this);
-        quickActionsButton.setText("快捷");
-        quickActionsButton.setTextSize(14);
+        quickActionsButton.setText("⋮");
+        quickActionsButton.setTextSize(28);
         quickActionsButton.setTextColor(Color.WHITE);
         quickActionsButton.setGravity(Gravity.CENTER);
-        quickActionsButton.setMinWidth(dp(64));
-        quickActionsButton.setMinHeight(dp(48));
-        quickActionsButton.setPadding(dp(14), dp(10), dp(14), dp(10));
+        quickActionsButton.setMinWidth(dp(48));
+        quickActionsButton.setMinHeight(dp(64));
+        quickActionsButton.setPadding(dp(8), dp(8), dp(8), dp(8));
         quickActionsButton.setContentDescription("打开快捷中心");
         quickActionsButton.setTooltipText("快捷中心");
         quickActionsButton.setElevation(dp(8));
         GradientDrawable quickBackground = new GradientDrawable();
-        quickBackground.setColor(UiTheme.accent(this));
-        quickBackground.setCornerRadius(dp(24));
+        int accent = UiTheme.accent(this);
+        quickBackground.setColor(Color.argb(224, Color.red(accent),
+                Color.green(accent), Color.blue(accent)));
+        quickBackground.setCornerRadii(new float[]{dp(22), dp(22), 0, 0,
+                0, 0, dp(22), dp(22)});
         quickActionsButton.setBackground(quickBackground);
         quickActionsButton.setOnClickListener(view -> openQuickActions());
         FrameLayout.LayoutParams quickParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.END | Gravity.BOTTOM);
-        quickParams.setMargins(dp(16), dp(16), dp(16), dp(24));
+                Gravity.END | Gravity.CENTER_VERTICAL);
+        quickParams.setMargins(dp(16), dp(16), 0, dp(16));
         appRoot.addView(quickActionsButton, quickParams);
 
         recoveryBanner = new TextView(this);
