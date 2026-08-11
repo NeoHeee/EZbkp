@@ -32,7 +32,6 @@ public final class QuickActionsSheet {
     private static CachedSheet cachedSheet;
     public interface Listener {
         void onHome();
-        void onSpeedTest();
         void onSettings();
         void onLock();
     }
@@ -108,6 +107,16 @@ public final class QuickActionsSheet {
             cachedSheet = create(activity, model);
         }
         cachedSheet.show(model, listener);
+    }
+
+    public static void prewarm(Activity activity, Model model) {
+        if (activity == null || activity.isFinishing() || activity.isDestroyed() || model == null) {
+            return;
+        }
+        if (cachedSheet == null || cachedSheet.activity != activity) {
+            release(cachedSheet == null ? null : cachedSheet.activity);
+            cachedSheet = create(activity, model);
+        }
     }
 
     public static void release(Activity activity) {

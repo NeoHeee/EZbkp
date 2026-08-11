@@ -52,6 +52,7 @@ public class MainActivity extends FragmentActivity implements
     private static final long AUTO_UPDATE_INTERVAL_MS = 24L * 60L * 60L * 1000L;
     private static final long BACKGROUND_STARTUP_PROBE_FALLBACK_MS = 2500L;
     private static final long PROGRESSIVE_PAGE_RETRY_DELAY_MS = 900L;
+    private static final long QUICK_ACTIONS_PREWARM_DELAY_MS = 400L;
 
     private SharedPreferences preferences;
     private String localUrl;
@@ -79,6 +80,12 @@ public class MainActivity extends FragmentActivity implements
 
     private final Runnable backgroundStartupProbe = this::runPendingBackgroundStartupProbe;
     private final Runnable progressivePageRetry = this::runProgressivePageRetry;
+    private final Runnable quickActionsPrewarm = () -> {
+        if (isFinishing() || isDestroyed() || stateMachine == null ||
+                stateMachine.getState() == AppStateMachine.State.LOCKED ||
+                stateMachine.getState() == AppStateMachine.State.SETTINGS) return;
+        QuickActionsSheet.prewarm(this, quickActionsModel());
+    };
 
     private ValueCallback<Uri[]> filePathCallback;
     private Uri pendingCameraUri;
@@ -536,7 +543,7 @@ public class MainActivity extends FragmentActivity implements
                 routeName(routeCoordinator.getActiveType());
         SettingsCenterPage.Model model = new SettingsCenterPage.Model(
                 routeSummary,
-                quickActionsEnabled ? "快捷入口已显示" : "快捷入口已隐藏",
+                quickActionsEnabled,
                 AppSecurity.isEnabled(this) ? AppSecurity.getModeLabel(this) : "未开启保护",
                 "v" + BuildConfig.VERSION_NAME,
                 cachedServerVersion == null ?
@@ -559,13 +566,10 @@ public class MainActivity extends FragmentActivity implements
             }
 
             @Override
-            public void onSpeedTest() {
-                routeCoordinator.manualSpeedTest();
-            }
-
-            @Override
-            public void onInteractionSettings() {
-                showInteractionSettings();
+            public void onQuickActionsChanged(boolean enabled) {
+                quickActionsEnabled = enabled;
+                preferences.edit().putBoolean(KEY_SHOW_QUICK_ACTIONS, enabled).apply();
+                updateQuickActionsVisibility();
             }
 
             @Override
@@ -821,12 +825,16 @@ public class MainActivity extends FragmentActivity implements
                 stateMachine.getState() != AppStateMachine.State.SETTINGS) {
             transitionTo(AppStateMachine.State.READY);
         }
+        View decor = getWindow().getDecorView();
+        decor.removeCallbacks(quickActionsPrewarm);
+        decor.postDelayed(quickActionsPrewarm, QUICK_ACTIONS_PREWARM_DELAY_MS);
     }
 
     @Override
     public void onPageFailure(WebViewController.Failure failure) {
         backgroundStartupProbePending = false;
         getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
+        getWindow().getDecorView().removeCallbacks(quickActionsPrewarm);
         lastFailure = failure;
         consecutivePageFailures++;
         rememberCurrentWebUrl();
@@ -890,11 +898,6 @@ public class MainActivity extends FragmentActivity implements
                 if (routeCoordinator.getActiveUrl() != null) {
                     webViewController.loadUrl(routeCoordinator.getActiveUrl());
                 }
-            }
-
-            @Override
-            public void onSpeedTest() {
-                routeCoordinator.manualSpeedTest();
             }
 
             @Override
@@ -1300,6 +1303,7 @@ public class MainActivity extends FragmentActivity implements
     protected void onDestroy() {
         getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
         getWindow().getDecorView().removeCallbacks(progressivePageRetry);
+        getWindow().getDecorView().removeCallbacks(quickActionsPrewarm);
         unregisterScreenOffReceiver();
         if (downloadController != null) downloadController.unregister();
         if (networkMonitor != null) networkMonitor.stop();
