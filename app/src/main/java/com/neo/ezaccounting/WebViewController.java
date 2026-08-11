@@ -92,6 +92,7 @@ public final class WebViewController {
     private long firstTwoFingerTapAt;
     private float firstTwoFingerTapX;
     private float firstTwoFingerTapY;
+    private boolean suppressNextIdentityRefresh;
 
     public WebViewController(Activity activity, Host host,
                              DownloadController downloadController) {
@@ -510,7 +511,11 @@ public final class WebViewController {
                     twoFingerTapCandidate = false;
                     break;
                 case MotionEvent.ACTION_UP:
-                    schedulePageIdentityRefresh();
+                    if (suppressNextIdentityRefresh) {
+                        suppressNextIdentityRefresh = false;
+                    } else {
+                        schedulePageIdentityRefresh();
+                    }
                 case MotionEvent.ACTION_CANCEL:
                     twoFingerTapCandidate = false;
                     break;
@@ -528,8 +533,10 @@ public final class WebViewController {
         if (secondTap) {
             firstTwoFingerTapAt = 0L;
             if (webView != null) {
-                webView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                webView.post(host::onOpenQuickActions);
+                suppressNextIdentityRefresh = true;
+                webView.removeCallbacks(pageIdentityRefresh);
+                webView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                host.onOpenQuickActions();
             }
         } else {
             firstTwoFingerTapAt = now;

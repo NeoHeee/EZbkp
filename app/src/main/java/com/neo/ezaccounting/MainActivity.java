@@ -1304,6 +1304,7 @@ public class MainActivity extends FragmentActivity implements
         if (downloadController != null) downloadController.unregister();
         if (networkMonitor != null) networkMonitor.stop();
         if (routeCoordinator != null) routeCoordinator.shutdown();
+        QuickActionsSheet.release(this);
         if (webViewController != null) webViewController.destroy();
         super.onDestroy();
     }
