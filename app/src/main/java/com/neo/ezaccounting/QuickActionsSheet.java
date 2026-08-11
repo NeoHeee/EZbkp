@@ -26,6 +26,10 @@ import java.util.Arrays;
 import java.util.List;
 
 public final class QuickActionsSheet {
+    private static final String TAG_ROUTE_VALUE = "quick-actions-route";
+    private static final String TAG_LATENCY_VALUE = "quick-actions-latency";
+    private static final String TAG_SECURITY_VALUE = "quick-actions-security";
+    private static CachedSheet cachedSheet;
     public interface Listener {
         void onHome();
         void onSpeedTest();
@@ -65,12 +69,58 @@ public final class QuickActionsSheet {
         }
     }
 
+    private static final class CachedSheet {
+        final Activity activity;
+        Dialog dialog;
+        TextView route;
+        TextView latency;
+        TextView security;
+        Listener listener;
+
+        CachedSheet(Activity activity) {
+            this.activity = activity;
+        }
+
+        void show(Model model, Listener nextListener) {
+            listener = nextListener;
+            route.setText(model.route);
+            latency.setText(model.latency);
+            security.setText(model.security);
+            if (!dialog.isShowing()) dialog.show();
+        }
+
+        void release() {
+            listener = null;
+            if (dialog != null) {
+                dialog.setOnShowListener(null);
+                if (dialog.isShowing()) dialog.dismiss();
+            }
+        }
+    }
+
     private QuickActionsSheet() {}
 
     public static void show(Activity activity, Model model, Listener listener) {
         if (activity == null || activity.isFinishing() || listener == null) return;
 
+        if (cachedSheet == null || cachedSheet.activity != activity) {
+            release(cachedSheet == null ? null : cachedSheet.activity);
+            cachedSheet = create(activity, model);
+        }
+        cachedSheet.show(model, listener);
+    }
+
+    public static void release(Activity activity) {
+        if (cachedSheet == null || (activity != null && cachedSheet.activity != activity)) return;
+        cachedSheet.release();
+        cachedSheet = null;
+    }
+
+    private static CachedSheet create(Activity activity, Model model) {
+        CachedSheet sheet = new CachedSheet(activity);
+
         Dialog dialog = new Dialog(activity);
+        sheet.dialog = dialog;
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCancelable(true);
         dialog.setCanceledOnTouchOutside(false);
@@ -92,11 +142,14 @@ public final class QuickActionsSheet {
         panel.setFocusable(true);
         panel.setOnClickListener(view -> { });
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            panel.setElevation(dp(activity, 20));
+            panel.setElevation(dp(activity, 12));
         }
 
         panel.addView(createHeader(activity, dialog));
         panel.addView(createStatusDashboard(activity, model));
+        sheet.route = panel.findViewWithTag(TAG_ROUTE_VALUE);
+        sheet.latency = panel.findViewWithTag(TAG_LATENCY_VALUE);
+        sheet.security = panel.findViewWithTag(TAG_SECURITY_VALUE);
 
         LinearLayout content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -105,7 +158,9 @@ public final class QuickActionsSheet {
         addSectionHeading(activity, content, "快捷操作", "常用页面、线路与安全控制");
         addActionRow(activity, content, Arrays.asList(
                 new ActionItem(android.R.drawable.ic_menu_view,
-                        "回到首页", "返回记账主页面", listener::onHome),
+                        "回到首页", "返回记账主页面", () -> {
+                            if (sheet.listener != null) sheet.listener.onHome();
+                        }),
                 new ActionItem(android.R.drawable.ic_popup_sync,
                         "刷新当前页面", "重新加载正在查看的网页", () -> {
                             boolean refreshed = WebViewController.reloadActive();
@@ -114,9 +169,13 @@ public final class QuickActionsSheet {
                                     Toast.LENGTH_SHORT).show();
                         }),
                 new ActionItem(android.R.drawable.ic_lock_lock,
-                        "立即上锁", "隐藏账目并重新验证", listener::onLock),
+                        "立即上锁", "隐藏账目并重新验证", () -> {
+                            if (sheet.listener != null) sheet.listener.onLock();
+                        }),
                 new ActionItem(android.R.drawable.ic_menu_preferences,
-                        "设置中心", "查看全部设置与维护工具", listener::onSettings)
+                        "设置中心", "查看全部设置与维护工具", () -> {
+                            if (sheet.listener != null) sheet.listener.onSettings();
+                        })
         ), dialog);
 
         panel.addView(content, new LinearLayout.LayoutParams(
@@ -141,7 +200,7 @@ public final class QuickActionsSheet {
             configureWindow(activity, dialog);
             animateIn(panel);
         });
-        dialog.show();
+        return sheet;
     }
 
     private static View createHeader(Context context, Dialog dialog) {
@@ -184,11 +243,11 @@ public final class QuickActionsSheet {
         LinearLayout statusRow = new LinearLayout(context);
         statusRow.setOrientation(LinearLayout.HORIZONTAL);
         statusRow.setPadding(0, dp(context, 6), 0, 0);
-        statusRow.addView(statusCell(context, "当前线路", model.route),
+        statusRow.addView(statusCell(context, "当前线路", model.route, TAG_ROUTE_VALUE),
                 statusCellParams(context, 0));
-        statusRow.addView(statusCell(context, "最近延迟", model.latency),
+        statusRow.addView(statusCell(context, "最近延迟", model.latency, TAG_LATENCY_VALUE),
                 statusCellParams(context, 1));
-        statusRow.addView(statusCell(context, "安全保护", model.security),
+        statusRow.addView(statusCell(context, "安全保护", model.security, TAG_SECURITY_VALUE),
                 statusCellParams(context, 2));
         panel.addView(statusRow);
 
@@ -199,7 +258,7 @@ public final class QuickActionsSheet {
         return panel;
     }
 
-    private static View statusCell(Context context, String label, String value) {
+    private static View statusCell(Context context, String label, String value, String valueTag) {
         LinearLayout cell = new LinearLayout(context);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setPadding(dp(context, 10), dp(context, 7), dp(context, 10), dp(context, 7));
@@ -207,6 +266,7 @@ public final class QuickActionsSheet {
 
         TextView small = text(context, label, 11, UiTheme.tertiaryText(context));
         TextView main = text(context, value, 14, UiTheme.primaryText(context));
+        main.setTag(valueTag);
         main.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         main.setPadding(0, dp(context, 2), 0, 0);
         main.setMaxLines(1);
@@ -293,7 +353,7 @@ public final class QuickActionsSheet {
         window.setGravity(Gravity.CENTER);
         window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         WindowManager.LayoutParams attributes = window.getAttributes();
-        attributes.dimAmount = UiTheme.isDark(activity) ? 0.70f : 0.56f;
+        attributes.dimAmount = UiTheme.isDark(activity) ? 0.58f : 0.46f;
         attributes.width = WindowManager.LayoutParams.MATCH_PARENT;
         attributes.height = WindowManager.LayoutParams.MATCH_PARENT;
         window.setAttributes(attributes);
@@ -304,12 +364,15 @@ public final class QuickActionsSheet {
     }
 
     private static void animateIn(View panel) {
+        panel.animate().cancel();
+        panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         panel.setAlpha(0f);
-        panel.setTranslationY(dp(panel.getContext(), 48));
+        panel.setTranslationY(dp(panel.getContext(), 32));
         panel.animate()
                 .alpha(1f)
                 .translationY(0f)
-                .setDuration(220L)
+                .setDuration(160L)
+                .withEndAction(() -> panel.setLayerType(View.LAYER_TYPE_NONE, null))
                 .start();
     }
 

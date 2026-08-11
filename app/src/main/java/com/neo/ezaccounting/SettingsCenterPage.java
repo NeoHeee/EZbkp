@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -58,51 +59,34 @@ public final class SettingsCenterPage {
         LinearLayout content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(activity, UiComponents.PAGE_HORIZONTAL_DP),
-                dp(activity, UiComponents.PAGE_TOP_DP),
+                dp(activity, 12),
                 dp(activity, UiComponents.PAGE_HORIZONTAL_DP),
                 dp(activity, UiComponents.PAGE_BOTTOM_DP));
         scroll.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        content.addView(header(activity, listener), fullWidth(activity, 22));
+        content.addView(header(activity, listener), fullWidth(activity, 16));
 
-        addSection(activity, content, "连接与线路");
-        LinearLayout connection = card(activity);
-        addRow(activity, connection, "服务器地址", model.routeSummary,
+        LinearLayout settings = card(activity);
+        addRow(activity, settings, "服务器地址", model.routeSummary,
                 listener::onServerAddresses, false);
-        addRow(activity, connection, "线路状态", "查看当前线路、延迟与可用性",
+        addRow(activity, settings, "线路状态", "当前线路与延迟",
                 listener::onRouteStatus, false);
-        addRow(activity, connection, "重新测速", "检测两条线路的连接速度",
-                listener::onSpeedTest, true);
-        content.addView(connection, fullWidth(activity, 24));
-
-        addSection(activity, content, "外观与交互");
-        LinearLayout interaction = card(activity);
-        addRow(activity, interaction, "快捷入口", model.interactionSummary,
-                listener::onInteractionSettings, true);
-        content.addView(interaction, fullWidth(activity, 24));
-
-        addSection(activity, content, "安全与隐私");
-        LinearLayout security = card(activity);
-        addRow(activity, security, "应用锁", model.securitySummary,
-                listener::onSecuritySettings, true);
-        content.addView(security, fullWidth(activity, 24));
-
-        addSection(activity, content, "诊断与维护");
-        LinearLayout diagnostics = card(activity);
-        addInfoRow(activity, diagnostics, "App 版本", model.appVersion, false);
-        addInfoRow(activity, diagnostics, "ezBookkeeping 服务端", model.serverVersion, false);
-        addRow(activity, diagnostics, "检查更新", "获取最新正式版本",
+        addRow(activity, settings, "重新测速", null,
+                listener::onSpeedTest, false);
+        addRow(activity, settings, "快捷入口", model.interactionSummary,
+                listener::onInteractionSettings, false);
+        addRow(activity, settings, "应用锁", model.securitySummary,
+                listener::onSecuritySettings, false);
+        addInfoRow(activity, settings, "App 版本", model.appVersion, false);
+        addInfoRow(activity, settings, "ezBookkeeping 服务端", model.serverVersion, false);
+        addRow(activity, settings, "检查更新", null,
                 listener::onCheckUpdate, false);
-        addRow(activity, diagnostics, "WebView 内核", "查看当前网页运行环境",
-                listener::onWebViewInfo, true);
-        content.addView(diagnostics, fullWidth(activity, 24));
-
-        addSection(activity, content, "数据管理");
-        LinearLayout data = card(activity);
-        addRow(activity, data, "清除登录与网页数据", "退出账号并清理 Cookie 与缓存",
+        addRow(activity, settings, "WebView 内核", null,
+                listener::onWebViewInfo, false);
+        addRow(activity, settings, "清除登录与网页数据", null,
                 listener::onClearSiteData, true, true);
-        content.addView(data, fullWidth(activity, 0));
+        content.addView(settings, fullWidth(activity, 0));
         return scroll;
     }
 
@@ -114,29 +98,22 @@ public final class SettingsCenterPage {
         LinearLayout row = new LinearLayout(context);
         row.setGravity(Gravity.CENTER_VERTICAL);
 
-        LinearLayout titles = new LinearLayout(context);
-        titles.setOrientation(LinearLayout.VERTICAL);
-        TextView title = text(context, "设置", 28, UiTheme.primaryText(context), true);
-        TextView subtitle = text(context, "连接、交互、安全与维护", 14,
-                UiTheme.secondaryText(context), false);
-        subtitle.setPadding(0, dp(context, 5), 0, 0);
-        titles.addView(title);
-        titles.addView(subtitle);
-        row.addView(titles, new LinearLayout.LayoutParams(0,
+        TextView back = text(context, "‹", 40, UiTheme.primaryText(context), false);
+        UiComponents.styleIconButton(back);
+        back.setGravity(Gravity.CENTER);
+        back.setContentDescription("返回记账页面");
+        back.setOnClickListener(view -> listener.onClose());
+        row.addView(back, new LinearLayout.LayoutParams(dp(context, 52), dp(context, 52)));
+
+        TextView title = text(context, "设置", 22, UiTheme.primaryText(context), false);
+        title.setGravity(Gravity.CENTER);
+        row.addView(title, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView close = text(context, "×", 28, UiTheme.secondaryText(context), false);
-        UiComponents.styleIconButton(close);
-        close.setContentDescription("关闭设置中心");
-        close.setOnClickListener(view -> listener.onClose());
-        row.addView(close, new LinearLayout.LayoutParams(dp(context, 48), dp(context, 48)));
+        View balance = new View(context);
+        balance.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        row.addView(balance, new LinearLayout.LayoutParams(dp(context, 52), dp(context, 52)));
         return row;
-    }
-
-    private static void addSection(Context context, LinearLayout parent, String title) {
-        TextView label = text(context, title, 13, UiTheme.secondaryText(context), true);
-        label.setPadding(dp(context, 4), 0, 0, dp(context, 9));
-        parent.addView(label);
     }
 
     private static LinearLayout card(Context context) {
@@ -156,7 +133,7 @@ public final class SettingsCenterPage {
                                    String value, boolean last) {
         LinearLayout row = new LinearLayout(context);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(context, 16), dp(context, 14), dp(context, 16), dp(context, 14));
+        row.setPadding(dp(context, 18), dp(context, 10), dp(context, 18), dp(context, 10));
         row.setMinimumHeight(dp(context, 64));
         row.setContentDescription(title + "。" + value);
 
@@ -165,8 +142,10 @@ public final class SettingsCenterPage {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         TextView version = text(context, value, 14, UiTheme.secondaryText(context), false);
         version.setGravity(Gravity.END);
+        version.setSingleLine(true);
+        version.setEllipsize(TextUtils.TruncateAt.END);
         row.addView(version, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         card.addView(row, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -186,32 +165,38 @@ public final class SettingsCenterPage {
                                boolean dangerous) {
         LinearLayout row = new LinearLayout(context);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(context, 16), dp(context, 14), dp(context, 12), dp(context, 14));
+        row.setPadding(dp(context, 18), dp(context, 10), dp(context, 10), dp(context, 10));
         row.setMinimumHeight(dp(context, 64));
         row.setClickable(true);
         row.setFocusable(true);
-        row.setContentDescription(title + "。" + summary);
+        row.setContentDescription(summary == null || summary.isEmpty() ? title :
+                title + "。" + summary);
         row.setBackground(ripple(context, Color.TRANSPARENT));
         row.setOnClickListener(view -> action.run());
 
-        LinearLayout labels = new LinearLayout(context);
-        labels.setOrientation(LinearLayout.VERTICAL);
         int titleColor = dangerous ? danger(context) : UiTheme.primaryText(context);
         TextView name = text(context, title, 16, titleColor, false);
-        TextView detail = text(context, summary, 13,
-                dangerous ? danger(context) : UiTheme.secondaryText(context), false);
-        detail.setAlpha(dangerous ? 0.82f : 1f);
-        detail.setPadding(0, dp(context, 4), 0, 0);
-        labels.addView(name);
-        labels.addView(detail);
-        row.addView(labels, new LinearLayout.LayoutParams(0,
+        row.addView(name, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView arrow = text(context, "›", 28,
+        if (summary != null && !summary.isEmpty()) {
+            TextView detail = text(context, summary, 14,
+                    dangerous ? danger(context) : UiTheme.secondaryText(context), false);
+            detail.setAlpha(dangerous ? 0.82f : 1f);
+            detail.setGravity(Gravity.END);
+            detail.setSingleLine(true);
+            detail.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.25f);
+            detailParams.leftMargin = dp(context, 12);
+            row.addView(detail, detailParams);
+        }
+
+        TextView arrow = text(context, "›", 30,
                 dangerous ? danger(context) : UiTheme.tertiaryText(context), false);
         arrow.setGravity(Gravity.CENTER);
         arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        row.addView(arrow, new LinearLayout.LayoutParams(dp(context, 32), dp(context, 48)));
+        row.addView(arrow, new LinearLayout.LayoutParams(dp(context, 28), dp(context, 48)));
         card.addView(row, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -233,7 +218,7 @@ public final class SettingsCenterPage {
 
     private static RippleDrawable ripple(Context context, GradientDrawable content) {
         return new RippleDrawable(ColorStateList.valueOf(Color.argb(
-                UiTheme.isDark(context) ? 54 : 34, 13, 148, 136)), content, null);
+                UiTheme.isDark(context) ? 54 : 34, 23, 107, 91)), content, null);
     }
 
     private static TextView text(Context context, String value, float size,
