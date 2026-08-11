@@ -10,11 +10,12 @@ import static org.junit.Assert.assertEquals;
 public class LocalRouteRulesTest {
     @Test
     public void exactWifiMatchWinsOverDefault() {
+        LocalRouteRule home = new LocalRouteRule("家里", "Home-5G", "http://home");
         List<LocalRouteRule> rules = Arrays.asList(
-                new LocalRouteRule("", "http://default"),
-                new LocalRouteRule("Home-5G", "http://home"));
+                new LocalRouteRule("", "http://default"), home);
 
         assertEquals("http://home", LocalRouteRules.select(rules, "home-5g", true));
+        assertEquals(home, LocalRouteRules.selectRule(rules, "HOME-5G", true));
     }
 
     @Test

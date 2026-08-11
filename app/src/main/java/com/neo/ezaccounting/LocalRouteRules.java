@@ -20,7 +20,8 @@ public final class LocalRouteRules {
                     if (item == null) continue;
                     String url = item.optString("url", "").trim();
                     if (!url.isEmpty()) {
-                        rules.add(new LocalRouteRule(item.optString("ssid", ""), url));
+                        rules.add(new LocalRouteRule(item.optString("name", ""),
+                                item.optString("ssid", ""), url));
                     }
                 }
             } catch (Exception ignored) {
@@ -41,6 +42,7 @@ public final class LocalRouteRules {
                 JSONObject item = new JSONObject();
                 try {
                     item.put("ssid", rule.ssid);
+                    item.put("name", rule.name);
                     item.put("url", rule.url);
                     array.put(item);
                 } catch (Exception ignored) {
@@ -52,19 +54,25 @@ public final class LocalRouteRules {
 
     public static String select(List<LocalRouteRule> rules, String currentSsid,
                                 boolean wifiConnected) {
-        if (rules == null || rules.isEmpty()) return "";
+        LocalRouteRule rule = selectRule(rules, currentSsid, wifiConnected);
+        return rule == null ? "" : rule.url;
+    }
+
+    public static LocalRouteRule selectRule(List<LocalRouteRule> rules, String currentSsid,
+                                             boolean wifiConnected) {
+        if (rules == null || rules.isEmpty()) return null;
         String normalizedSsid = currentSsid == null ? "" : currentSsid.trim();
         if (wifiConnected && !normalizedSsid.isEmpty()) {
             for (LocalRouteRule rule : rules) {
                 if (rule != null && !rule.ssid.isEmpty() &&
                         rule.ssid.equalsIgnoreCase(normalizedSsid)) {
-                    return rule.url;
+                    return rule;
                 }
             }
         }
         for (LocalRouteRule rule : rules) {
-            if (rule != null && rule.isDefault()) return rule.url;
+            if (rule != null && rule.isDefault()) return rule;
         }
-        return "";
+        return null;
     }
 }

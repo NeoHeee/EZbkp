@@ -462,7 +462,9 @@ public class MainActivity extends FragmentActivity implements
         serverSettingsVisible = true;
         stateBeforeSettings = stateMachine.getState();
         transitionTo(AppStateMachine.State.SETTINGS);
-        showOverlay(ServerSettingsPage.create(this, localRouteRules, publicUrl,
+        String activeLocalUrl = routeCoordinator.getActiveType() == RouteManager.TYPE_LOCAL ?
+                routeCoordinator.getActiveUrl() : null;
+        showOverlay(ServerSettingsPage.create(this, localRouteRules, publicUrl, activeLocalUrl,
                 new ServerSettingsPage.Listener() {
             @Override
             public void onSaved(List<LocalRouteRule> savedRules, String savedPublic) {
@@ -493,6 +495,19 @@ public class MainActivity extends FragmentActivity implements
                     wifiSsidPermissionLauncher.launch(new String[]{
                             Manifest.permission.ACCESS_FINE_LOCATION});
                 }
+            }
+
+            @Override
+            public void onTestAddress(String url,
+                                      ServerSettingsPage.AddressTestCallback callback) {
+                routeCoordinator.testLocalAddress(url, result -> {
+                    if (result.reachable) {
+                        callback.onResult(true, result.latencyMs > 0 ?
+                                result.latencyMs + " ms" : "连接正常");
+                    } else {
+                        callback.onResult(false, result.diagnostic());
+                    }
+                });
             }
 
             @Override

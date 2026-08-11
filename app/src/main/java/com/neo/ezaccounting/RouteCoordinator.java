@@ -149,6 +149,10 @@ public final class RouteCoordinator {
         return activeType;
     }
 
+    public void testLocalAddress(String url, RouteManager.ProbeCallback callback) {
+        routeManager.probeOnlyAsync(url, RouteManager.TYPE_LOCAL, callback);
+    }
+
     public Snapshot getLastSnapshot() {
         return lastSnapshot;
     }
