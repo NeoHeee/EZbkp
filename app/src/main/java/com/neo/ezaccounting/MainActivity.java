@@ -31,6 +31,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.fragment.app.FragmentActivity;
 
 import java.net.URI;
+import java.util.List;
 
 public class MainActivity extends FragmentActivity implements
         RouteCoordinator.Host,
@@ -40,6 +41,7 @@ public class MainActivity extends FragmentActivity implements
 
     private static final String PREFS = "ez_accounting_prefs";
     private static final String KEY_LOCAL_URL = "local_url";
+    private static final String KEY_LOCAL_ROUTE_RULES = "local_route_rules";
     private static final String KEY_PUBLIC_URL = "public_url";
     private static final String KEY_LAST_UPDATE_CHECK = "last_update_check";
     private static final String KEY_SHOW_QUICK_ACTIONS = "show_quick_actions";
@@ -54,6 +56,7 @@ public class MainActivity extends FragmentActivity implements
     private SharedPreferences preferences;
     private String localUrl;
     private String publicUrl;
+    private List<LocalRouteRule> localRouteRules;
     private String pendingShortcutAction;
     private String lastWebUrl;
     private String restoredBaseUrl;
@@ -125,6 +128,22 @@ public class MainActivity extends FragmentActivity implements
                 }
             });
 
+    private final ActivityResultLauncher<String[]> wifiSsidPermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
+                boolean granted = Boolean.TRUE.equals(
+                        result.get(Manifest.permission.ACCESS_FINE_LOCATION));
+                refreshLocalRouteForNetwork();
+                if (granted) {
+                    Toast.makeText(this,
+                            "已允许识别 Wi-Fi，重新进入连接页面即可显示当前名称",
+                            Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(this,
+                            "未获得定位权限，将在无法识别 Wi-Fi 时使用公网地址",
+                            Toast.LENGTH_LONG).show();
+                }
+            });
+
     private final BroadcastReceiver screenOffReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -143,7 +162,11 @@ public class MainActivity extends FragmentActivity implements
         createPersistentRoot();
 
         preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
-        localUrl = preferences.getString(KEY_LOCAL_URL, "");
+        String legacyLocalUrl = preferences.getString(KEY_LOCAL_URL, "");
+        localRouteRules = LocalRouteRules.decode(
+                preferences.getString(KEY_LOCAL_ROUTE_RULES, ""), legacyLocalUrl);
+        localUrl = LocalRouteRules.select(localRouteRules,
+                WifiRouteContext.currentSsid(this), WifiRouteContext.isWifiConnected(this));
         publicUrl = preferences.getString(KEY_PUBLIC_URL, "");
         quickActionsEnabled = preferences.getBoolean(KEY_SHOW_QUICK_ACTIONS, true);
         updateQuickActionsVisibility();
@@ -435,14 +458,16 @@ public class MainActivity extends FragmentActivity implements
         serverSettingsVisible = true;
         stateBeforeSettings = stateMachine.getState();
         transitionTo(AppStateMachine.State.SETTINGS);
-        showOverlay(ServerSettingsPage.create(this, localUrl, publicUrl,
+        showOverlay(ServerSettingsPage.create(this, localRouteRules, publicUrl,
                 new ServerSettingsPage.Listener() {
             @Override
-            public void onSaved(String savedLocal, String savedPublic) {
-                localUrl = savedLocal;
+            public void onSaved(List<LocalRouteRule> savedRules, String savedPublic) {
+                localRouteRules = savedRules;
                 publicUrl = savedPublic;
+                refreshLocalRouteForNetwork();
                 preferences.edit()
                         .putString(KEY_LOCAL_URL, localUrl)
+                        .putString(KEY_LOCAL_ROUTE_RULES, LocalRouteRules.encode(localRouteRules))
                         .putString(KEY_PUBLIC_URL, publicUrl)
                         .apply();
                 routeCoordinator.setAddresses(localUrl, publicUrl);
@@ -451,6 +476,18 @@ public class MainActivity extends FragmentActivity implements
                 hideOverlay();
                 transitionTo(AppStateMachine.State.CHECKING_ROUTE);
                 routeCoordinator.requestCheck(RouteCoordinator.Trigger.RETRY);
+            }
+
+            @Override
+            public void onWifiPermissionRequested() {
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+                    wifiSsidPermissionLauncher.launch(new String[]{
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION});
+                } else {
+                    wifiSsidPermissionLauncher.launch(new String[]{
+                            Manifest.permission.ACCESS_FINE_LOCATION});
+                }
             }
 
             @Override
@@ -1078,11 +1115,19 @@ public class MainActivity extends FragmentActivity implements
     }
 
     private void onDefaultNetworkChanged() {
+        refreshLocalRouteForNetwork();
         if (lifecycleCoordinator == null || !lifecycleCoordinator.isInitialized() ||
                 lifecycleCoordinator.isAuthInProgress() || !routeCoordinator.hasConfiguredRoute()) {
             return;
         }
         routeCoordinator.requestCheck(RouteCoordinator.Trigger.NETWORK_CHANGE);
+    }
+
+    private void refreshLocalRouteForNetwork() {
+        localUrl = LocalRouteRules.select(localRouteRules,
+                WifiRouteContext.currentSsid(this), WifiRouteContext.isWifiConnected(this));
+        if (preferences != null) preferences.edit().putString(KEY_LOCAL_URL, localUrl).apply();
+        if (routeCoordinator != null) routeCoordinator.setAddresses(localUrl, publicUrl);
     }
 
     private void openIntentUri(String uriString) {
