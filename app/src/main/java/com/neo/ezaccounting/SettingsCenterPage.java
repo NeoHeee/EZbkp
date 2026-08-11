@@ -248,7 +248,7 @@ public final class SettingsCenterPage {
     }
 
     private static int danger(Context context) {
-        return UiTheme.isDark(context) ? Color.rgb(248, 113, 113) : Color.rgb(190, 24, 34);
+        return UiTheme.danger(context);
     }
 
     private static LinearLayout.LayoutParams fullWidth(Context context, int bottomMargin) {

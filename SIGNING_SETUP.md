@@ -1,4 +1,4 @@
-# EZ记账固定签名配置
+# 拾账固定签名配置
 
 本项目使用 GitHub Actions Secrets 注入固定 Android 签名证书。签名私钥不得提交到仓库。
 

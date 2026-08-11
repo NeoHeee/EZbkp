@@ -82,8 +82,8 @@ jobs:
           fi
           mkdir -p dist
           APK='app/build/outputs/apk/release/app-release.apk'
-          OUTPUT="dist/EZ记账-v${VERSION}-signed.apk"
-          CERT_INFO="dist/EZ记账-v${VERSION}-签名信息.txt"
+          OUTPUT="dist/拾账-Ledgerly-v${VERSION}-signed.apk"
+          CERT_INFO="dist/拾账-Ledgerly-v${VERSION}-签名信息.txt"
           APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
           test -x "$APKSIGNER" || { echo "apksigner not found: $APKSIGNER"; exit 1; }
           cp "$APK" "$OUTPUT"
@@ -101,7 +101,7 @@ jobs:
       - name: Upload signed APK
         uses: actions/upload-artifact@v6
         with:
-          name: EZ记账-Signed-Release
+          name: 拾账-Ledgerly-Signed-Release
           path: dist/*
           if-no-files-found: error
           retention-days: 90

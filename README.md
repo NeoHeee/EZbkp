@@ -1,6 +1,8 @@
-# EZ记账
+# 拾账 · Ledgerly
 
-面向自托管 [ezBookkeeping](https://github.com/mayswind/ezbookkeeping) 的轻量 Android 客户端。它保留 ezBookkeeping 熟悉的移动端界面，并补充原生连接管理、应用锁、文件交互和移动端体验，让日常记账更接近一款完整的 Android 应用。
+**拾账（Ledgerly）**是面向自托管 [ezBookkeeping](https://github.com/mayswind/ezbookkeeping) 的轻量 Android 客户端。它保留 ezBookkeeping 熟悉的移动端界面，并补充原生连接管理、应用锁、文件交互和移动端体验。
+
+> 拾起每一笔，掌握自己的账本。
 
 > 本项目是非官方客户端，不包含 ezBookkeeping 服务端，也不隶属于 ezBookkeeping 官方项目。使用前需要准备可访问的 ezBookkeeping 实例。
 
@@ -34,7 +36,7 @@
 
 - 保持 Cookie 和登录状态
 - 支持拍照、图片多选和普通附件上传
-- 文件下载到系统“下载/EZ记账”目录，完成后可直接打开
+- 文件下载到系统“下载/拾账”目录，完成后可直接打开
 - 可在应用内查看 App 与 ezBookkeeping 服务端版本，并检查 GitHub Releases 更新
 - 拒绝无效 HTTPS 证书和 HTTPS 页面中的 HTTP 混合内容
 
@@ -74,9 +76,10 @@ gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
 
 ## 项目信息
 
-- 应用名称：EZ记账
+- 中文名称：拾账
+- 英文名称：Ledgerly
 - 包名：`com.neo.ezaccounting`
-- 当前版本：`1.6.0`（versionCode 21）
+- 当前版本：`1.6.1`（versionCode 22）
 - 最低 Android：8.0（API 26）
 - 目标 Android：API 35
 - 许可证：MIT

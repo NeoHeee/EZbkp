@@ -328,8 +328,7 @@ public final class ServerSettingsPage {
                 testStatus.setText((reachable ? "连接正常 · " : "连接失败 · ") + detail);
                 testStatus.setTextColor(reachable ?
                         UiTheme.accent(activity) :
-                        (UiTheme.isDark(activity) ? Color.rgb(248, 113, 113) :
-                                Color.rgb(185, 28, 28)));
+                        UiTheme.danger(activity));
             });
         });
         remove.setOnClickListener(view -> {

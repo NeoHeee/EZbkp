@@ -54,10 +54,10 @@ public final class ErrorRecoveryPage {
         icon.setText("!");
         icon.setGravity(Gravity.CENTER);
         icon.setTextSize(34);
-        icon.setTextColor(Color.WHITE);
+        icon.setTextColor(UiTheme.accentDark(activity));
         icon.setTypeface(null, android.graphics.Typeface.BOLD);
         GradientDrawable iconBg = new GradientDrawable();
-        iconBg.setColor(Color.rgb(217, 119, 6));
+        iconBg.setColor(UiTheme.gold(activity));
         iconBg.setShape(GradientDrawable.OVAL);
         icon.setBackground(iconBg);
         LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(

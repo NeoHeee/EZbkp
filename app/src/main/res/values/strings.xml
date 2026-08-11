@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">EZ记账</string>
+    <string name="app_name">拾账</string>
     <string name="shortcut_routes_short">线路设置</string>
     <string name="shortcut_routes_long">配置本地和公网线路</string>
     <string name="shortcut_security_short">安全设置</string>

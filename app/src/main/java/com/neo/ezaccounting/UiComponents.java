@@ -35,7 +35,7 @@ public final class UiComponents {
         button.setMinHeight(dp(context, CONTROL_HEIGHT_DP));
         GradientDrawable background = new GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{Color.rgb(15, 118, 110), Color.rgb(13, 148, 136)});
+                new int[]{UiTheme.accentDark(context), UiTheme.accent(context)});
         background.setCornerRadius(dp(context, 14));
         button.setBackground(background);
     }
@@ -57,10 +57,9 @@ public final class UiComponents {
         button.setFocusable(true);
         GradientDrawable circle = new GradientDrawable();
         circle.setShape(GradientDrawable.OVAL);
-        circle.setColor(UiTheme.isDark(context) ? Color.rgb(40, 51, 52) :
-                Color.rgb(235, 241, 240));
+        circle.setColor(UiTheme.softGold(context));
         button.setBackground(new RippleDrawable(ColorStateList.valueOf(Color.argb(
-                UiTheme.isDark(context) ? 54 : 34, 13, 148, 136)), circle, null));
+                UiTheme.isDark(context) ? 64 : 42, 23, 107, 91)), circle, null));
     }
 
     public static AlertDialog show(AlertDialog dialog) {

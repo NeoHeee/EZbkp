@@ -128,11 +128,11 @@ public final class DownloadController {
             String cookies = CookieManager.getInstance().getCookie(url);
             if (cookies != null) request.addRequestHeader("Cookie", cookies);
             request.setTitle(fileName);
-            request.setDescription("EZ记账正在下载");
+            request.setDescription("拾账正在下载");
             request.setNotificationVisibility(
                     DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS,
-                    "EZ记账/" + fileName);
+                    "拾账/" + fileName);
             DownloadManager manager =
                     (DownloadManager) activity.getSystemService(Context.DOWNLOAD_SERVICE);
             lastDownloadId = manager.enqueue(request);
@@ -145,7 +145,7 @@ public final class DownloadController {
 
     private String uniqueName(String original) {
         String name = original == null || original.trim().isEmpty() ?
-                "EZ记账导出" : original.trim();
+                "拾账导出" : original.trim();
         name = name.replaceAll("[\\/:*?\"<>|]", "_");
         int dot = name.lastIndexOf('.');
         String suffix = "-" + System.currentTimeMillis();
@@ -164,7 +164,7 @@ public final class DownloadController {
                 .setTitle("下载完成")
                 .setMessage(fileName == null || fileName.isEmpty() ?
                         "文件已保存到下载目录" :
-                        fileName + "\n已保存到下载目录/EZ记账")
+                        fileName + "\n已保存到下载目录/拾账")
                 .setNegativeButton("关闭", null)
                 .setPositiveButton("打开文件", (dialog, which) -> {
                     try {
