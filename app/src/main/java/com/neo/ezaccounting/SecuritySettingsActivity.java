@@ -22,7 +22,11 @@ import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 public class SecuritySettingsActivity extends FragmentActivity {
+    private final ExecutorService securityExecutor = Executors.newSingleThreadExecutor();
     private TextView currentMode;
     private Button relockButton;
     private Button screenOffButton;
@@ -213,9 +217,30 @@ public class SecuritySettingsActivity extends FragmentActivity {
             String two = second.getText().toString();
             if (one.length() != 4) { first.setError("请输入四位数字"); return; }
             if (!one.equals(two)) { second.setError("两次输入不一致"); return; }
-            AppSecurity.setPin(this, one);
-            dialog.dismiss();
-            securityChanged("已启用四位数字密码");
+            Button save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            save.setEnabled(false);
+            save.setText("保存中…");
+            first.setEnabled(false);
+            second.setEnabled(false);
+            securityExecutor.execute(() -> {
+                try {
+                    AppSecurity.setPin(getApplicationContext(), one);
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        dialog.dismiss();
+                        securityChanged("已启用四位数字密码");
+                    });
+                } catch (RuntimeException error) {
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        save.setEnabled(true);
+                        save.setText("保存");
+                        first.setEnabled(true);
+                        second.setEnabled(true);
+                        Toast.makeText(this, "保存密码失败，请重试", Toast.LENGTH_LONG).show();
+                    });
+                }
+            });
         }));
         dialog.show();
     }
@@ -271,9 +296,26 @@ public class SecuritySettingsActivity extends FragmentActivity {
                 patternView.postDelayed(patternView::clearPattern, 450);
                 return;
             }
-            AppSecurity.setPattern(this, pattern);
-            dialog.dismiss();
-            securityChanged("已启用九宫格图形锁");
+            patternView.setEnabled(false);
+            instruction.setText("正在安全保存图形…");
+            securityExecutor.execute(() -> {
+                try {
+                    AppSecurity.setPattern(getApplicationContext(), pattern);
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        dialog.dismiss();
+                        securityChanged("已启用九宫格图形锁");
+                    });
+                } catch (RuntimeException error) {
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        firstPattern[0] = null;
+                        patternView.setEnabled(true);
+                        patternView.clearPattern();
+                        instruction.setText("保存失败，请重新绘制");
+                    });
+                }
+            });
         });
         dialog.show();
     }
@@ -337,4 +379,10 @@ public class SecuritySettingsActivity extends FragmentActivity {
     }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+
+    @Override
+    protected void onDestroy() {
+        securityExecutor.shutdownNow();
+        super.onDestroy();
+    }
 }

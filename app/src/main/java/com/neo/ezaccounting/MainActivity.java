@@ -44,6 +44,7 @@ public class MainActivity extends FragmentActivity implements
     private static final String WEB_URL_KEY = "web_url";
     private static final String BASE_URL_KEY = "base_url";
     private static final long AUTO_UPDATE_INTERVAL_MS = 24L * 60L * 60L * 1000L;
+    private static final long BACKGROUND_STARTUP_PROBE_FALLBACK_MS = 2500L;
 
     private SharedPreferences preferences;
     private String localUrl;
@@ -54,6 +55,9 @@ public class MainActivity extends FragmentActivity implements
     private long lastBackPressedAt;
     private boolean screenReceiverRegistered;
     private boolean serverSettingsVisible;
+    private boolean backgroundStartupProbePending;
+
+    private final Runnable backgroundStartupProbe = this::runPendingBackgroundStartupProbe;
 
     private ValueCallback<Uri[]> filePathCallback;
     private Uri pendingCameraUri;
@@ -208,10 +212,17 @@ public class MainActivity extends FragmentActivity implements
     }
 
     private void scheduleBackgroundStartupProbe() {
-        getWindow().getDecorView().postDelayed(() -> {
-            if (isFinishing() || isDestroyed() || serverSettingsVisible) return;
-            routeCoordinator.requestCheck(RouteCoordinator.Trigger.BACKGROUND_STARTUP);
-        }, 300L);
+        backgroundStartupProbePending = true;
+        getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
+        getWindow().getDecorView().postDelayed(backgroundStartupProbe,
+                BACKGROUND_STARTUP_PROBE_FALLBACK_MS);
+    }
+
+    private void runPendingBackgroundStartupProbe() {
+        if (!backgroundStartupProbePending || isFinishing() || isDestroyed() ||
+                serverSettingsVisible) return;
+        backgroundStartupProbePending = false;
+        routeCoordinator.requestCheck(RouteCoordinator.Trigger.BACKGROUND_STARTUP);
     }
 
     private void handlePendingShortcutAction() {
@@ -455,6 +466,10 @@ public class MainActivity extends FragmentActivity implements
         lastWebUrl = url;
         lastFailure = null;
         routeCoordinator.markPageSuccess();
+        if (backgroundStartupProbePending) {
+            getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
+            runPendingBackgroundStartupProbe();
+        }
         if (stateMachine.getState() != AppStateMachine.State.LOCKED &&
                 stateMachine.getState() != AppStateMachine.State.SETTINGS) {
             transitionTo(AppStateMachine.State.READY);
@@ -463,6 +478,8 @@ public class MainActivity extends FragmentActivity implements
 
     @Override
     public void onPageFailure(WebViewController.Failure failure) {
+        backgroundStartupProbePending = false;
+        getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
         lastFailure = failure;
         rememberCurrentWebUrl();
         routeCoordinator.markPageFailure();
@@ -936,6 +953,7 @@ public class MainActivity extends FragmentActivity implements
 
     @Override
     protected void onDestroy() {
+        getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
         unregisterScreenOffReceiver();
         if (downloadController != null) downloadController.unregister();
         if (networkMonitor != null) networkMonitor.stop();

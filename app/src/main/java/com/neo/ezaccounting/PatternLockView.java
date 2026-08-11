@@ -18,7 +18,10 @@ public class PatternLockView extends View {
     private final Paint circlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint selectedPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint innerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Path linePath = new Path();
     private final List<Integer> selected = new ArrayList<>();
+    private final boolean[] selectedNodes = new boolean[9];
     private Listener listener;
     private float cellSize;
     private float radius;
@@ -42,12 +45,15 @@ public class PatternLockView extends View {
         linePaint.setStrokeJoin(Paint.Join.ROUND);
         linePaint.setColor(UiTheme.accent(getContext()));
         linePaint.setAlpha(180);
+        innerPaint.setStyle(Paint.Style.FILL);
+        innerPaint.setColor(UiTheme.surface(getContext()));
     }
 
     public void setListener(Listener listener) { this.listener = listener; }
 
     public void clearPattern() {
         selected.clear();
+        java.util.Arrays.fill(selectedNodes, false);
         drawing = false;
         invalidate();
     }
@@ -71,24 +77,22 @@ public class PatternLockView extends View {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         if (!selected.isEmpty()) {
-            Path path = new Path();
+            linePath.reset();
             for (int i = 0; i < selected.size(); i++) {
                 float x = nodeX(selected.get(i));
                 float y = nodeY(selected.get(i));
-                if (i == 0) path.moveTo(x, y); else path.lineTo(x, y);
+                if (i == 0) linePath.moveTo(x, y); else linePath.lineTo(x, y);
             }
-            if (drawing) path.lineTo(currentX, currentY);
-            canvas.drawPath(path, linePaint);
+            if (drawing) linePath.lineTo(currentX, currentY);
+            canvas.drawPath(linePath, linePaint);
         }
 
-        Paint inner = new Paint(Paint.ANTI_ALIAS_FLAG);
-        inner.setColor(UiTheme.surface(getContext()));
         for (int i = 0; i < 9; i++) {
             float x = nodeX(i);
             float y = nodeY(i);
-            if (selected.contains(i)) {
+            if (selectedNodes[i]) {
                 canvas.drawCircle(x, y, radius, selectedPaint);
-                canvas.drawCircle(x, y, radius * 0.33f, inner);
+                canvas.drawCircle(x, y, radius * 0.33f, innerPaint);
             } else {
                 canvas.drawCircle(x, y, radius, circlePaint);
             }
@@ -101,7 +105,9 @@ public class PatternLockView extends View {
         currentY = event.getY();
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                selected.clear(); drawing = true; addTouchedNode(currentX, currentY); invalidate(); return true;
+                selected.clear();
+                java.util.Arrays.fill(selectedNodes, false);
+                drawing = true; addTouchedNode(currentX, currentY); invalidate(); return true;
             case MotionEvent.ACTION_MOVE:
                 addTouchedNode(currentX, currentY); invalidate(); return true;
             case MotionEvent.ACTION_UP:
@@ -119,9 +125,10 @@ public class PatternLockView extends View {
             float dx = x - nodeX(i);
             float dy = y - nodeY(i);
             float hitRadius = radius * 1.9f;
-            if ((dx * dx + dy * dy) <= hitRadius * hitRadius && !selected.contains(i)) {
+            if ((dx * dx + dy * dy) <= hitRadius * hitRadius && !selectedNodes[i]) {
                 addIntermediateNodeIfNeeded(i);
                 selected.add(i);
+                selectedNodes[i] = true;
                 performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK);
                 return;
             }
@@ -135,7 +142,10 @@ public class PatternLockView extends View {
         int colSum = previous % 3 + next % 3;
         if (rowSum % 2 == 0 && colSum % 2 == 0) {
             int middle = (rowSum / 2) * 3 + colSum / 2;
-            if (middle != previous && middle != next && !selected.contains(middle)) selected.add(middle);
+            if (middle != previous && middle != next && !selectedNodes[middle]) {
+                selected.add(middle);
+                selectedNodes[middle] = true;
+            }
         }
     }
 

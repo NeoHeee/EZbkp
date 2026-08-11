@@ -27,10 +27,15 @@ import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 public class LockActivity extends FragmentActivity {
     public static final String EXTRA_REASON = "reason";
 
     private final Handler lockoutHandler = new Handler(Looper.getMainLooper());
+    private final ExecutorService securityExecutor = Executors.newSingleThreadExecutor();
+    private boolean verificationInProgress;
     private LinearLayout root;
     private TextView message;
     private EditText pinInput;
@@ -126,21 +131,18 @@ public class LockActivity extends FragmentActivity {
     }
 
     private void verifyPin() {
+        if (verificationInProgress) return;
         if (AppSecurity.getRemainingLockoutMs(this) > 0) {
             refreshLockoutState();
             return;
         }
         String pin = pinInput.getText().toString();
         if (pin.length() != 4) { pinInput.setError("请输入四位数字密码"); return; }
-        if (AppSecurity.verifySecret(this, pin)) {
-            unlockSuccess();
-            return;
-        }
-        pinInput.setText("");
-        long delay = AppSecurity.recordFailedAttempt(this);
-        if (delay > 0) refreshLockoutState();
-        else message.setText("密码错误");
-        pinInput.requestFocus();
+        setVerificationInProgress(true, "正在验证…");
+        securityExecutor.execute(() -> {
+            boolean verified = AppSecurity.verifySecret(getApplicationContext(), pin);
+            runOnUiThread(() -> finishSecretVerification(verified, false));
+        });
     }
 
     private void showPatternLock() {
@@ -160,30 +162,57 @@ public class LockActivity extends FragmentActivity {
         root.addView(hint, fullWrap(dp(6)));
 
         patternView.setListener(pattern -> {
+            if (verificationInProgress) return;
             if (AppSecurity.getRemainingLockoutMs(this) > 0) {
                 patternView.clearPattern();
                 refreshLockoutState();
                 return;
             }
-            if (AppSecurity.verifySecret(this, pattern)) {
-                unlockSuccess();
-                return;
-            }
-            long delay = AppSecurity.recordFailedAttempt(this);
-            if (delay > 0) refreshLockoutState();
-            else message.setText("图形错误");
-            patternView.postDelayed(patternView::clearPattern, 450);
+            setVerificationInProgress(true, "正在验证图形…");
+            securityExecutor.execute(() -> {
+                boolean verified = AppSecurity.verifySecret(getApplicationContext(), pattern);
+                runOnUiThread(() -> finishSecretVerification(verified, true));
+            });
         });
         refreshLockoutState();
+    }
+
+    private void setVerificationInProgress(boolean inProgress, String status) {
+        verificationInProgress = inProgress;
+        if (pinInput != null) pinInput.setEnabled(!inProgress);
+        if (unlockButton != null) unlockButton.setEnabled(!inProgress);
+        if (patternView != null) patternView.setEnabled(!inProgress);
+        if (inProgress && status != null) message.setText(status);
+    }
+
+    private void finishSecretVerification(boolean verified, boolean pattern) {
+        if (isFinishing() || isDestroyed()) return;
+        verificationInProgress = false;
+        if (verified) {
+            unlockSuccess();
+            return;
+        }
+        long delay = AppSecurity.recordFailedAttempt(this);
+        if (pattern && patternView != null) {
+            patternView.postDelayed(patternView::clearPattern, 450);
+        } else if (pinInput != null) {
+            pinInput.setText("");
+            pinInput.requestFocus();
+        }
+        if (delay > 0) refreshLockoutState();
+        else {
+            setVerificationInProgress(false, null);
+            message.setText(pattern ? "图形错误" : "密码错误");
+        }
     }
 
     private void refreshLockoutState() {
         lockoutHandler.removeCallbacks(lockoutTick);
         long remaining = AppSecurity.getRemainingLockoutMs(this);
         boolean lockedOut = remaining > 0;
-        if (pinInput != null) pinInput.setEnabled(!lockedOut);
-        if (unlockButton != null) unlockButton.setEnabled(!lockedOut);
-        if (patternView != null) patternView.setEnabled(!lockedOut);
+        if (pinInput != null) pinInput.setEnabled(!lockedOut && !verificationInProgress);
+        if (unlockButton != null) unlockButton.setEnabled(!lockedOut && !verificationInProgress);
+        if (patternView != null) patternView.setEnabled(!lockedOut && !verificationInProgress);
 
         if (!lockedOut) {
             message.setText(normalPrompt);
@@ -375,6 +404,7 @@ public class LockActivity extends FragmentActivity {
     @Override
     protected void onDestroy() {
         lockoutHandler.removeCallbacksAndMessages(null);
+        securityExecutor.shutdownNow();
         super.onDestroy();
     }
 

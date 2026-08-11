@@ -19,6 +19,7 @@ import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.ProgressBar;
 
 import java.lang.ref.WeakReference;
 
@@ -66,6 +67,7 @@ public final class WebViewController {
     private final DownloadController downloadController;
 
     private WebView webView;
+    private ProgressBar pageProgress;
     private String baseUrl;
     private boolean pageReady;
 
@@ -96,6 +98,17 @@ public final class WebViewController {
         webView.setBackgroundColor(UiTheme.webBackground(activity));
         root.addView(webView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        pageProgress = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
+        pageProgress.setMax(100);
+        pageProgress.setProgressTintList(android.content.res.ColorStateList.valueOf(
+                UiTheme.accent(activity)));
+        pageProgress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(
+                Color.TRANSPARENT));
+        pageProgress.setVisibility(View.GONE);
+        FrameLayout.LayoutParams progressParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, dp(3));
+        progressParams.gravity = android.view.Gravity.TOP;
+        root.addView(pageProgress, progressParams);
         activeController = new WeakReference<>(this);
 
         configure();
@@ -213,12 +226,14 @@ public final class WebViewController {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 pageReady = false;
+                showPageProgress();
                 host.onPageStarted(url);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 pageReady = true;
+                completePageProgress();
                 host.onPageReady(url);
             }
 
@@ -257,6 +272,17 @@ public final class WebViewController {
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
+            public void onProgressChanged(WebView view, int newProgress) {
+                if (pageProgress == null) return;
+                if (newProgress < 100) {
+                    if (pageProgress.getVisibility() != View.VISIBLE) showPageProgress();
+                    pageProgress.setProgress(Math.max(5, newProgress));
+                } else {
+                    completePageProgress();
+                }
+            }
+
+            @Override
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
                                              FileChooserParams params) {
                 host.onFileChooserRequested(callback, params);
@@ -264,6 +290,24 @@ public final class WebViewController {
             }
         });
         webView.setDownloadListener(downloadController.createListener());
+    }
+
+    private void showPageProgress() {
+        if (pageProgress == null) return;
+        pageProgress.animate().cancel();
+        pageProgress.setAlpha(1f);
+        pageProgress.setProgress(5);
+        pageProgress.setVisibility(View.VISIBLE);
+    }
+
+    private void completePageProgress() {
+        if (pageProgress == null || pageProgress.getVisibility() != View.VISIBLE) return;
+        pageProgress.setProgress(100);
+        pageProgress.animate().alpha(0f).setDuration(160L).withEndAction(() -> {
+            if (pageProgress == null) return;
+            pageProgress.setVisibility(View.GONE);
+            pageProgress.setAlpha(1f);
+        }).start();
     }
 
     private Failure fromWebError(int code, String detail, String url) {
@@ -379,6 +423,10 @@ public final class WebViewController {
             webView.stopLoading();
             webView.destroy();
             webView = null;
+        }
+        if (pageProgress != null) {
+            pageProgress.animate().cancel();
+            pageProgress = null;
         }
         pageReady = false;
     }
