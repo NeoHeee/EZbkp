@@ -28,11 +28,11 @@ public class LocalRouteRulesTest {
     }
 
     @Test
-    public void legacyDefaultRuleStillWorksOutsideWifi() {
+    public void defaultRuleIsBoundToWifi() {
         List<LocalRouteRule> rules = Arrays.asList(
                 new LocalRouteRule("", "http://default"));
 
-        assertEquals("http://default", LocalRouteRules.select(rules, "Home", false));
+        assertEquals("", LocalRouteRules.select(rules, "Home", false));
     }
 
     @Test

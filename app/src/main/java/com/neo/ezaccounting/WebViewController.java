@@ -82,9 +82,7 @@ public final class WebViewController {
     private String baseUrl;
     private boolean pageReady;
     private boolean mainFrameFailed;
-    private EzBookkeepingPageDetector.PageIdentity cachedPageIdentity =
-            EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
-    private String cachedIdentityUrl;
+    private final PageIdentityCache pageIdentityCache = new PageIdentityCache();
     private boolean identityCheckInProgress;
     private final List<ValueCallback<EzBookkeepingPageDetector.PageIdentity>>
             pendingIdentityCallbacks = new ArrayList<>();
@@ -271,18 +269,31 @@ public final class WebViewController {
         return webView == null ? null : webView.getUrl();
     }
 
-    public EzBookkeepingPageDetector.PageIdentity getCachedPageIdentity() {
-        return cachedPageIdentity;
+    public boolean canGoBack() {
+        return webView != null && webView.canGoBack();
+    }
+
+    public void goBack() {
+        if (webView != null) webView.goBack();
+    }
+
+    public void loadAsHome(String url) {
+        if (webView == null || url == null || url.trim().isEmpty()) return;
+        webView.clearHistory();
+        loadUrl(url);
+        WebView active = webView;
+        active.postDelayed(() -> {
+            if (webView == active && active.getParent() != null) active.clearHistory();
+        }, 1200L);
     }
 
     public void resolvePageIdentity(
             ValueCallback<EzBookkeepingPageDetector.PageIdentity> callback) {
         if (callback == null) return;
         String currentUrl = currentUrl();
-        if (cachedPageIdentity != EzBookkeepingPageDetector.PageIdentity.UNKNOWN &&
-                (cachedIdentityUrl == null ? currentUrl == null :
-                        cachedIdentityUrl.equals(currentUrl))) {
-            callback.onReceiveValue(cachedPageIdentity);
+        EzBookkeepingPageDetector.PageIdentity cached = pageIdentityCache.getFor(currentUrl);
+        if (cached != EzBookkeepingPageDetector.PageIdentity.UNKNOWN) {
+            callback.onReceiveValue(cached);
             return;
         }
         pendingIdentityCallbacks.add(callback);
@@ -290,24 +301,21 @@ public final class WebViewController {
     }
 
     public void refreshPageIdentityAfterNavigation() {
-        cachedPageIdentity = EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
-        cachedIdentityUrl = null;
+        pageIdentityCache.invalidate();
         schedulePageIdentityRefresh();
     }
 
     public void loadUrl(String url) {
         if (webView == null || url == null || url.trim().isEmpty()) return;
         pageReady = false;
-        cachedPageIdentity = EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
-        cachedIdentityUrl = null;
+        pageIdentityCache.invalidate();
         webView.loadUrl(url);
     }
 
     public void reload() {
         if (webView != null) {
             pageReady = false;
-            cachedPageIdentity = EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
-            cachedIdentityUrl = null;
+            pageIdentityCache.invalidate();
             webView.reload();
         }
     }
@@ -385,8 +393,7 @@ public final class WebViewController {
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 pageReady = false;
                 mainFrameFailed = false;
-                cachedPageIdentity = EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
-                cachedIdentityUrl = null;
+                pageIdentityCache.invalidate();
                 showPageProgress();
                 host.onPageStarted(url);
             }
@@ -567,8 +574,7 @@ public final class WebViewController {
     private void schedulePageIdentityRefresh() {
         if (webView == null) return;
         String currentUrl = webView.getUrl();
-        if (cachedPageIdentity != EzBookkeepingPageDetector.PageIdentity.UNKNOWN &&
-                (cachedIdentityUrl == null ? currentUrl == null : cachedIdentityUrl.equals(currentUrl))) {
+        if (pageIdentityCache.isValidFor(currentUrl)) {
             return;
         }
         webView.removeCallbacks(pageIdentityRefresh);
@@ -591,9 +597,8 @@ public final class WebViewController {
                 deliverIdentityCallbacks(EzBookkeepingPageDetector.PageIdentity.UNKNOWN);
                 return;
             }
-            cachedPageIdentity = EzBookkeepingPageDetector.parseIdentity(result);
-            cachedIdentityUrl = identityUrl;
-            deliverIdentityCallbacks(cachedPageIdentity);
+            pageIdentityCache.update(identityUrl, EzBookkeepingPageDetector.parseIdentity(result));
+            deliverIdentityCallbacks(pageIdentityCache.get());
         });
     }
 
@@ -653,7 +658,6 @@ public final class WebViewController {
         }
         pageReady = false;
         mainFrameFailed = false;
-        cachedPageIdentity = EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
-        cachedIdentityUrl = null;
+        pageIdentityCache.invalidate();
     }
 }

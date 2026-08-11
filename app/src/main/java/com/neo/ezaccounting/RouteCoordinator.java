@@ -1,6 +1,7 @@
 package com.neo.ezaccounting;
 
 import android.content.SharedPreferences;
+import android.net.Network;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -72,6 +73,8 @@ public final class RouteCoordinator {
     private Snapshot lastSnapshot;
     private String lastWebVerifiedUrl;
     private long routeGeneration;
+    private long checkSequence;
+    private Network localNetwork;
 
     public RouteCoordinator(SharedPreferences preferences, Host host) {
         this(preferences, host, new RouteManager(), new RouteSwitchPolicy());
@@ -136,8 +139,18 @@ public final class RouteCoordinator {
         return activeType;
     }
 
+    public void setLocalNetwork(Network network) {
+        long previous = localNetwork == null ? -1L : localNetwork.getNetworkHandle();
+        long next = network == null ? -1L : network.getNetworkHandle();
+        localNetwork = network;
+        if (previous != next) {
+            routeGeneration++;
+            switchPolicy.onLocalCandidateChanged();
+        }
+    }
+
     public void testLocalAddress(String url, RouteManager.ProbeCallback callback) {
-        routeManager.probeOnlyAsync(url, RouteManager.TYPE_LOCAL, callback);
+        routeManager.probeOnlyAsync(url, RouteManager.TYPE_LOCAL, localNetwork, callback);
     }
 
     public Snapshot getLastSnapshot() {
@@ -148,6 +161,12 @@ public final class RouteCoordinator {
         Trigger safeTrigger = trigger == null ? Trigger.RETRY : trigger;
         if (safeTrigger == Trigger.NETWORK_CHANGE) {
             routeGeneration++;
+        }
+        if (checkInProgress && shouldReplaceRunningCheck(safeTrigger)) {
+            checkSequence++;
+            checkInProgress = false;
+            pendingTrigger = null;
+            routeManager.cancelActiveProbes();
         }
         performCheck(safeTrigger);
     }
@@ -186,11 +205,16 @@ public final class RouteCoordinator {
         }
 
         checkInProgress = true;
+        long sequence = ++checkSequence;
         long generation = routeGeneration;
         String checkedLocalUrl = localUrl;
         String checkedPublicUrl = publicUrl;
         host.onRouteCheckStarted(trigger);
-        routeManager.probeAllAsync(checkedLocalUrl, checkedPublicUrl, raw -> {
+        boolean allowCache = trigger != Trigger.MANUAL_SPEED_TEST &&
+                trigger != Trigger.PAGE_FAILURE && trigger != Trigger.RETRY;
+        routeManager.probeAllAsync(checkedLocalUrl, checkedPublicUrl, localNetwork,
+                allowCache, raw -> {
+            if (sequence != checkSequence) return;
             checkInProgress = false;
             if (generation != routeGeneration ||
                     !checkedLocalUrl.equals(localUrl) ||
@@ -314,6 +338,11 @@ public final class RouteCoordinator {
         if ((current == Trigger.NETWORK_CHANGE || current == Trigger.BACKGROUND_STARTUP) &&
                 next == Trigger.PAGE_FAILURE) return next;
         return current;
+    }
+
+    private boolean shouldReplaceRunningCheck(Trigger trigger) {
+        return trigger == Trigger.NETWORK_CHANGE || trigger == Trigger.PAGE_FAILURE ||
+                trigger == Trigger.RETRY || trigger == Trigger.MANUAL_SPEED_TEST;
     }
 
     private void drainPending() {

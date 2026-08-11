@@ -45,4 +45,25 @@ public class RouteManagerTest {
         assertNull(RouteManager.selectBest(local, remote, ""));
     }
 
+    @Test
+    public void scoreCombinesWifiMatchLatencyAndReliability() {
+        RouteManager.ProbeResult unstableLocal = route("http://local",
+                RouteManager.TYPE_LOCAL, true, 900).withHealth(20, false);
+        RouteManager.ProbeResult stablePublic = route("https://remote",
+                RouteManager.TYPE_PUBLIC, true, 80).withHealth(100, false);
+
+        assertEquals(stablePublic, RouteManager.selectBest(
+                unstableLocal, stablePublic, "", true));
+    }
+
+    @Test
+    public void wifiMatchBonusKeepsHealthyLocalRoute() {
+        RouteManager.ProbeResult local = route("http://local",
+                RouteManager.TYPE_LOCAL, true, 240).withHealth(90, false);
+        RouteManager.ProbeResult remote = route("https://remote",
+                RouteManager.TYPE_PUBLIC, true, 80).withHealth(100, false);
+
+        assertEquals(local, RouteManager.selectBest(local, remote, "", true));
+    }
+
 }
