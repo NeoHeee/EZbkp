@@ -94,8 +94,7 @@ public final class QuickActionsSheet {
         void prewarm() {
             if (dialog == null || dialog.isShowing()) return;
             prewarming = true;
-            configureWindow(activity, dialog);
-            setWindowComposition(dialog, 0f, 0f);
+            configureHiddenWindow(dialog);
             dialog.show();
             View decor = dialog.getWindow() == null ? null : dialog.getWindow().getDecorView();
             if (decor == null) {
@@ -114,7 +113,6 @@ public final class QuickActionsSheet {
 
         void hide() {
             prewarming = false;
-            listener = null;
             if (dialog != null) dialog.hide();
         }
 
@@ -411,8 +409,30 @@ public final class QuickActionsSheet {
     }
 
     private static void restoreVisibleWindow(Activity activity, Dialog dialog) {
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
+        }
         configureWindow(activity, dialog);
         setWindowComposition(dialog, 1f, UiTheme.isDark(activity) ? 0.58f : 0.46f);
+    }
+
+    private static void configureHiddenWindow(Dialog dialog) {
+        Window window = dialog.getWindow();
+        if (window == null) return;
+        window.setBackgroundDrawableResource(android.R.color.transparent);
+        window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
+        window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        WindowManager.LayoutParams attributes = window.getAttributes();
+        attributes.alpha = 0f;
+        attributes.dimAmount = 0f;
+        attributes.width = WindowManager.LayoutParams.MATCH_PARENT;
+        attributes.height = WindowManager.LayoutParams.MATCH_PARENT;
+        window.setAttributes(attributes);
+        window.setLayout(WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT);
     }
 
     private static void setWindowComposition(Dialog dialog, float alpha, float dimAmount) {
