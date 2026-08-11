@@ -33,7 +33,7 @@ public final class QuickActionsSheet {
         void onManualRoute();
         void onSpeedTest();
         void onOpenBrowser();
-        void onEditAddresses();
+        void onSettings();
         void onLock();
         void onSecuritySettings();
         void onCheckUpdate();
@@ -147,8 +147,8 @@ public final class QuickActionsSheet {
 
         addSectionHeading(activity, content, "更多工具", "服务器、更新与运行环境");
         addTileGrid(activity, content, Arrays.asList(
-                new ActionItem(android.R.drawable.ic_menu_edit,
-                        "服务器地址", "修改本地和公网地址", listener::onEditAddresses),
+                new ActionItem(android.R.drawable.ic_menu_preferences,
+                        "设置中心", "连接、交互、安全与维护", listener::onSettings),
                 new ActionItem(android.R.drawable.ic_menu_share,
                         "浏览器打开", "交给系统浏览器访问", listener::onOpenBrowser),
                 new ActionItem(android.R.drawable.stat_sys_download_done,

@@ -451,6 +451,70 @@ public class MainActivity extends FragmentActivity implements
                 }));
     }
 
+    private void showSettingsCenter() {
+        rememberCurrentWebUrl();
+        serverSettingsVisible = true;
+        stateBeforeSettings = stateMachine.getState();
+        transitionTo(AppStateMachine.State.SETTINGS);
+        String routeSummary = routeCoordinator.getMode().label() + " · " +
+                routeName(routeCoordinator.getActiveType());
+        SettingsCenterPage.Model model = new SettingsCenterPage.Model(
+                routeSummary,
+                quickActionsEnabled ? "快捷入口已显示" : "快捷入口已隐藏",
+                AppSecurity.isEnabled(this) ? AppSecurity.getModeLabel(this) : "未开启保护");
+        showOverlay(SettingsCenterPage.create(this, model, new SettingsCenterPage.Listener() {
+            @Override
+            public void onClose() {
+                handleNativeOverlayBack();
+            }
+
+            @Override
+            public void onServerAddresses() {
+                showServerSettings();
+            }
+
+            @Override
+            public void onRouteStatus() {
+                showRouteStatusDialog();
+            }
+
+            @Override
+            public void onRouteMode() {
+                showManualRouteDialog();
+            }
+
+            @Override
+            public void onSpeedTest() {
+                routeCoordinator.manualSpeedTest();
+            }
+
+            @Override
+            public void onInteractionSettings() {
+                showServerSettings();
+            }
+
+            @Override
+            public void onSecuritySettings() {
+                requestSecuritySettings();
+            }
+
+            @Override
+            public void onCheckUpdate() {
+                checkForUpdates(true);
+            }
+
+            @Override
+            public void onWebViewInfo() {
+                showWebViewInfo();
+            }
+
+            @Override
+            public void onClearSiteData() {
+                confirmClearSiteData();
+            }
+        }));
+    }
+
     private void showLoadingScreen(String text) {
         UiTheme.applySystemBars(this);
         FrameLayout root = new FrameLayout(this);
@@ -751,8 +815,8 @@ public class MainActivity extends FragmentActivity implements
             }
 
             @Override
-            public void onEditAddresses() {
-                showServerSettings();
+            public void onSettings() {
+                showSettingsCenter();
             }
 
             @Override
