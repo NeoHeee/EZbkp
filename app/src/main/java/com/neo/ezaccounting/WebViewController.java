@@ -269,14 +269,6 @@ public final class WebViewController {
         return webView == null ? null : webView.getUrl();
     }
 
-    public boolean canGoBack() {
-        return webView != null && webView.canGoBack();
-    }
-
-    public void goBack() {
-        if (webView != null) webView.goBack();
-    }
-
     public void loadAsHome(String url) {
         if (webView == null || url == null || url.trim().isEmpty()) return;
         webView.clearHistory();

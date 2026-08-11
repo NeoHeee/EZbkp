@@ -78,6 +78,15 @@ public class MainActivity extends FragmentActivity implements
     private boolean serverVersionRequestPending;
     private Runnable pendingWifiPermissionRefresh;
 
+    private AppStateMachine stateMachine;
+    private AppStateMachine.State stateBeforeLock = AppStateMachine.State.INITIALIZING;
+    private AppStateMachine.State stateBeforeSettings = AppStateMachine.State.INITIALIZING;
+    private AppLifecycleCoordinator lifecycleCoordinator;
+    private RouteCoordinator routeCoordinator;
+    private NetworkMonitor networkMonitor;
+    private DownloadController downloadController;
+    private WebViewController webViewController;
+
     private final Runnable backgroundStartupProbe = this::runPendingBackgroundStartupProbe;
     private final Runnable progressivePageRetry = this::runProgressivePageRetry;
     private final Runnable quickActionsPrewarm = () -> {
@@ -90,15 +99,6 @@ public class MainActivity extends FragmentActivity implements
     private ValueCallback<Uri[]> filePathCallback;
     private Uri pendingCameraUri;
     private WebViewController.Failure lastFailure;
-
-    private AppStateMachine stateMachine;
-    private AppStateMachine.State stateBeforeLock = AppStateMachine.State.INITIALIZING;
-    private AppStateMachine.State stateBeforeSettings = AppStateMachine.State.INITIALIZING;
-    private AppLifecycleCoordinator lifecycleCoordinator;
-    private RouteCoordinator routeCoordinator;
-    private NetworkMonitor networkMonitor;
-    private DownloadController downloadController;
-    private WebViewController webViewController;
 
     private final ActivityResultLauncher<Intent> appUnlockLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
