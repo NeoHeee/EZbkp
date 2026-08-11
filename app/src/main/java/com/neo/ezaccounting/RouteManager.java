@@ -245,28 +245,13 @@ public final class RouteManager {
         return local;
     }
 
-    static ProbeResult selectForMode(RouteMode mode, ProbeResult local,
-                                     ProbeResult publicRoute, String lastSuccessfulUrl) {
-        RouteMode safeMode = mode == null ? RouteMode.AUTO : mode;
-        if (safeMode == RouteMode.LOCAL) return local != null && local.reachable ? local : null;
-        if (safeMode == RouteMode.PUBLIC) {
-            return publicRoute != null && publicRoute.reachable ? publicRoute : null;
-        }
-        return selectBest(local, publicRoute, lastSuccessfulUrl);
-    }
-
-    static ProbeResult selectForModeWithWebFallback(RouteMode mode, ProbeResult local,
-                                                     ProbeResult publicRoute,
-                                                     String lastSuccessfulUrl,
-                                                     boolean allowFallback) {
-        ProbeResult selected = selectForMode(mode, local, publicRoute, lastSuccessfulUrl);
+    static ProbeResult selectWithWebFallback(ProbeResult local, ProbeResult publicRoute,
+                                             String lastSuccessfulUrl,
+                                             boolean allowFallback) {
+        ProbeResult selected = selectBest(local, publicRoute, lastSuccessfulUrl);
         if (selected != null || !allowFallback || !eligibleForWebVerification(publicRoute)) {
             return selected;
         }
-
-        RouteMode safeMode = mode == null ? RouteMode.AUTO : mode;
-        if (safeMode == RouteMode.PUBLIC) return publicRoute.asWebVerificationCandidate();
-        if (safeMode == RouteMode.LOCAL) return null;
 
         boolean localConfigured = local != null && local.isConfigured();
         boolean localReachable = local != null && local.reachable;

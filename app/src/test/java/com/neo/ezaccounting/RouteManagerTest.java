@@ -45,22 +45,4 @@ public class RouteManagerTest {
         assertNull(RouteManager.selectBest(local, remote, ""));
     }
 
-    @Test
-    public void forcedLocalDoesNotFallBackToPublic() {
-        RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL, false, 1700);
-        RouteManager.ProbeResult remote = route("https://remote", RouteManager.TYPE_PUBLIC, true, 100);
-        assertNull(RouteManager.selectForMode(RouteMode.LOCAL, local, remote, ""));
-    }
-
-    @Test
-    public void forcedPublicUsesPublicEvenWhenLocalIsFaster() {
-        RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL, true, 20);
-        RouteManager.ProbeResult remote = route("https://remote", RouteManager.TYPE_PUBLIC, true, 200);
-        assertEquals(remote, RouteManager.selectForMode(RouteMode.PUBLIC, local, remote, ""));
-    }
-
-    @Test
-    public void invalidStoredModeFallsBackToAuto() {
-        assertEquals(RouteMode.AUTO, RouteMode.fromStored("removed-mode"));
-    }
 }

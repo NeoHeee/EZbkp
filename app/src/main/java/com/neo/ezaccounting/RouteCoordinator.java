@@ -6,7 +6,6 @@ import android.os.Looper;
 
 public final class RouteCoordinator {
     public static final String KEY_LAST_ROUTE = "last_route";
-    public static final String KEY_ROUTE_MODE = "route_mode";
     public static final String KEY_LOCAL_LATENCY = "local_latency_ms";
     public static final String KEY_PUBLIC_LATENCY = "public_latency_ms";
 
@@ -31,15 +30,13 @@ public final class RouteCoordinator {
 
     public static final class Snapshot {
         public final RouteManager.Selection selection;
-        public final RouteMode mode;
         public final String activeUrl;
         public final int activeType;
         public final long checkedAt;
 
-        Snapshot(RouteManager.Selection selection, RouteMode mode, String activeUrl,
-                 int activeType, long checkedAt) {
+        Snapshot(RouteManager.Selection selection, String activeUrl, int activeType,
+                 long checkedAt) {
             this.selection = selection;
-            this.mode = mode;
             this.activeUrl = activeUrl;
             this.activeType = activeType;
             this.checkedAt = checkedAt;
@@ -86,7 +83,6 @@ public final class RouteCoordinator {
         this.host = host;
         this.routeManager = routeManager;
         this.switchPolicy = switchPolicy;
-        preferences.edit().remove(KEY_ROUTE_MODE).apply();
     }
 
     public void setAddresses(String localUrl, String publicUrl) {
@@ -109,8 +105,7 @@ public final class RouteCoordinator {
     }
 
     public boolean activateFastStartRoute() {
-        FastStartPolicy.Candidate candidate = FastStartPolicy.select(getMode(), localUrl,
-                publicUrl, preferences.getString(KEY_LAST_ROUTE, ""));
+        FastStartPolicy.Candidate candidate = FastStartPolicy.select(localUrl, publicUrl);
         if (candidate == null) return false;
 
         long latency = candidate.type == RouteManager.TYPE_LOCAL ?
@@ -122,7 +117,7 @@ public final class RouteCoordinator {
         RouteManager.Selection selection = new RouteManager.Selection(target,
                 candidate.type == RouteManager.TYPE_LOCAL ? target : null,
                 candidate.type == RouteManager.TYPE_PUBLIC ? target : null);
-        Snapshot snapshot = new Snapshot(selection, getMode(), candidate.url, candidate.type,
+        Snapshot snapshot = new Snapshot(selection, candidate.url, candidate.type,
                 System.currentTimeMillis());
         activeUrl = candidate.url;
         activeType = candidate.type;
@@ -131,10 +126,6 @@ public final class RouteCoordinator {
         switchPolicy.recordSuccess(activeType);
         host.onRouteActivated(target, snapshot, true, candidate.reason, Trigger.FAST_START);
         return true;
-    }
-
-    public RouteMode getMode() {
-        return RouteMode.AUTO;
     }
 
     public String getActiveUrl() {
@@ -187,7 +178,7 @@ public final class RouteCoordinator {
             return;
         }
         if (!hasConfiguredRoute()) {
-            Snapshot empty = new Snapshot(null, getMode(), activeUrl, activeType,
+            Snapshot empty = new Snapshot(null, activeUrl, activeType,
                     System.currentTimeMillis());
             lastSnapshot = empty;
             host.onRouteUnavailable(empty, "尚未配置服务器地址", trigger);
@@ -207,15 +198,14 @@ public final class RouteCoordinator {
                 drainPending();
                 return;
             }
-            RouteMode mode = getMode();
             String lastRoute = preferences.getString(KEY_LAST_ROUTE, "");
 
             RouteManager.ProbeResult local = preserveWebVerification(raw.local);
             RouteManager.ProbeResult remote = preserveWebVerification(raw.publicRoute);
             boolean allowWebFallback = trigger != Trigger.MANUAL_SPEED_TEST &&
                     trigger != Trigger.PAGE_FAILURE;
-            RouteManager.ProbeResult selected = RouteManager.selectForModeWithWebFallback(
-                    mode, local, remote, lastRoute, allowWebFallback);
+            RouteManager.ProbeResult selected = RouteManager.selectWithWebFallback(
+                    local, remote, lastRoute, allowWebFallback);
 
             if (selected != null && selected.verificationPending) {
                 if (selected.type == RouteManager.TYPE_LOCAL) local = selected;
@@ -223,7 +213,7 @@ public final class RouteCoordinator {
             }
 
             RouteManager.Selection selection = new RouteManager.Selection(selected, local, remote);
-            Snapshot snapshot = new Snapshot(selection, mode, activeUrl, activeType,
+            Snapshot snapshot = new Snapshot(selection, activeUrl, activeType,
                     System.currentTimeMillis());
             lastSnapshot = snapshot;
             saveLatencies(snapshot);
@@ -280,7 +270,7 @@ public final class RouteCoordinator {
         if (activeType == RouteManager.TYPE_LOCAL) local = active;
         if (activeType == RouteManager.TYPE_PUBLIC) remote = active;
         RouteManager.Selection selection = new RouteManager.Selection(active, local, remote);
-        lastSnapshot = new Snapshot(selection, getMode(), activeUrl, activeType,
+        lastSnapshot = new Snapshot(selection, activeUrl, activeType,
                 System.currentTimeMillis());
     }
 
@@ -297,7 +287,7 @@ public final class RouteCoordinator {
             switchPolicy.blockLocalRetry(snapshot.checkedAt);
         }
         if (!target.verificationPending) switchPolicy.recordSuccess(activeType);
-        Snapshot activated = new Snapshot(snapshot.selection, snapshot.mode, activeUrl,
+        Snapshot activated = new Snapshot(snapshot.selection, activeUrl,
                 activeType, snapshot.checkedAt);
         lastSnapshot = activated;
         host.onRouteActivated(target, activated, changed, reason, trigger);

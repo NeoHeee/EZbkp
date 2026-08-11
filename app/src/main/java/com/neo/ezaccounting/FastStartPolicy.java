@@ -15,20 +15,9 @@ public final class FastStartPolicy {
 
     private FastStartPolicy() {}
 
-    public static Candidate select(RouteMode mode, String localUrl, String publicUrl,
-                                   String lastSuccessfulUrl) {
-        RouteMode safeMode = mode == null ? RouteMode.AUTO : mode;
+    public static Candidate select(String localUrl, String publicUrl) {
         String local = clean(localUrl);
         String remote = clean(publicUrl);
-
-        if (safeMode == RouteMode.LOCAL) {
-            return local.isEmpty() ? null : new Candidate(local, RouteManager.TYPE_LOCAL,
-                    "按固定本地模式快速进入");
-        }
-        if (safeMode == RouteMode.PUBLIC) {
-            return remote.isEmpty() ? null : new Candidate(remote, RouteManager.TYPE_PUBLIC,
-                    "按固定公网模式快速进入");
-        }
         if (!local.isEmpty()) {
             return new Candidate(local, RouteManager.TYPE_LOCAL,
                     "当前网络匹配局域网地址，自动优先使用");

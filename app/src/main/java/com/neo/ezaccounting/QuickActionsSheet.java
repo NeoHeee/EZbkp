@@ -37,13 +37,11 @@ public final class QuickActionsSheet {
     }
 
     public static final class Model {
-        public final String mode;
         public final String route;
         public final String latency;
         public final String security;
 
-        public Model(String mode, String route, String latency, String security) {
-            this.mode = safe(mode, "自动选择");
+        public Model(String route, String latency, String security) {
             this.route = safe(route, "未选择线路");
             this.latency = safe(latency, "待测速");
             this.security = safe(security, "未开启保护");

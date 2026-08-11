@@ -15,7 +15,6 @@ public final class UnifiedMainActivity extends MainActivity {
     private static final String KEY_PUBLIC_URL = "public_url";
 
     private long unifiedLastBackPressedAt;
-    private boolean pageIdentityCheckInProgress;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -59,13 +58,8 @@ public final class UnifiedMainActivity extends MainActivity {
         }
 
         boolean urlAtHome = BackNavigationPolicy.isAtHome(homeUrl, webView.getUrl());
-        if (pageIdentityCheckInProgress) return;
-        pageIdentityCheckInProgress = true;
-        webView.evaluateJavascript(EzBookkeepingPageDetector.homeDetectionScript(), result -> {
-            pageIdentityCheckInProgress = false;
+        resolveCurrentPageIdentity(identity -> {
             if (isFinishing() || isDestroyed() || webView.getParent() == null) return;
-            EzBookkeepingPageDetector.PageIdentity identity =
-                    EzBookkeepingPageDetector.parseIdentity(result);
             boolean atHome = EzBookkeepingPageDetector.resolveHome(identity, urlAtHome);
             performBackDecision(currentAppState(), webView, hasConfiguredRoute(),
                     webView.canGoBack(), atHome, homeUrl, System.currentTimeMillis());

@@ -609,26 +609,6 @@ public class MainActivity extends FragmentActivity implements
         });
     }
 
-    private void showInteractionSettings() {
-        serverSettingsVisible = true;
-        transitionTo(AppStateMachine.State.SETTINGS);
-        showOverlay(InteractionSettingsPage.create(this, quickActionsEnabled,
-                new InteractionSettingsPage.Listener() {
-                    @Override
-                    public void onChanged(boolean showQuickActions) {
-                        quickActionsEnabled = showQuickActions;
-                        preferences.edit().putBoolean(KEY_SHOW_QUICK_ACTIONS,
-                                quickActionsEnabled).apply();
-                        updateQuickActionsVisibility();
-                    }
-
-                    @Override
-                    public void onClose() {
-                        showSettingsCenter();
-                    }
-                }));
-    }
-
     private void showLoadingScreen(String text) {
         UiTheme.applySystemBars(this);
         FrameLayout root = new FrameLayout(this);
@@ -925,7 +905,7 @@ public class MainActivity extends FragmentActivity implements
         }
         String security = AppSecurity.isEnabled(this) ?
                 AppSecurity.getModeLabel(this) : "未开启保护";
-        return new QuickActionsSheet.Model("自动管理",
+        return new QuickActionsSheet.Model(
                 routeName(routeCoordinator.getActiveType()), latency, security);
     }
 
@@ -1178,6 +1158,15 @@ public class MainActivity extends FragmentActivity implements
     protected final EzBookkeepingPageDetector.PageIdentity cachedPageIdentity() {
         return webViewController == null ? EzBookkeepingPageDetector.PageIdentity.UNKNOWN :
                 webViewController.getCachedPageIdentity();
+    }
+
+    protected final void resolveCurrentPageIdentity(
+            ValueCallback<EzBookkeepingPageDetector.PageIdentity> callback) {
+        if (webViewController == null) {
+            callback.onReceiveValue(EzBookkeepingPageDetector.PageIdentity.UNKNOWN);
+            return;
+        }
+        webViewController.resolvePageIdentity(callback);
     }
 
     protected final void refreshPageIdentityAfterNavigation() {

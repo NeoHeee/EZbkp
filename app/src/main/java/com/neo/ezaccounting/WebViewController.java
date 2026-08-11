@@ -28,6 +28,8 @@ import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -69,7 +71,7 @@ public final class WebViewController {
 
     private static WeakReference<WebViewController> activeController =
             new WeakReference<>(null);
-    private static final ExecutorService metadataExecutor = Executors.newCachedThreadPool();
+    private static final ExecutorService metadataExecutor = Executors.newSingleThreadExecutor();
 
     private final Activity activity;
     private final Host host;
@@ -83,6 +85,9 @@ public final class WebViewController {
     private EzBookkeepingPageDetector.PageIdentity cachedPageIdentity =
             EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
     private String cachedIdentityUrl;
+    private boolean identityCheckInProgress;
+    private final List<ValueCallback<EzBookkeepingPageDetector.PageIdentity>>
+            pendingIdentityCallbacks = new ArrayList<>();
     private final Runnable pageIdentityRefresh = this::refreshPageIdentity;
 
     private boolean twoFingerTapCandidate;
@@ -268,6 +273,20 @@ public final class WebViewController {
 
     public EzBookkeepingPageDetector.PageIdentity getCachedPageIdentity() {
         return cachedPageIdentity;
+    }
+
+    public void resolvePageIdentity(
+            ValueCallback<EzBookkeepingPageDetector.PageIdentity> callback) {
+        if (callback == null) return;
+        String currentUrl = currentUrl();
+        if (cachedPageIdentity != EzBookkeepingPageDetector.PageIdentity.UNKNOWN &&
+                (cachedIdentityUrl == null ? currentUrl == null :
+                        cachedIdentityUrl.equals(currentUrl))) {
+            callback.onReceiveValue(cachedPageIdentity);
+            return;
+        }
+        pendingIdentityCallbacks.add(callback);
+        refreshPageIdentity();
     }
 
     public void refreshPageIdentityAfterNavigation() {
@@ -558,15 +577,34 @@ public final class WebViewController {
 
     private void refreshPageIdentity() {
         WebView active = webView;
-        if (active == null) return;
+        if (active == null || identityCheckInProgress) return;
+        identityCheckInProgress = true;
         String identityUrl = active.getUrl();
         active.evaluateJavascript(EzBookkeepingPageDetector.homeDetectionScript(), result -> {
-            if (webView != active) return;
+            identityCheckInProgress = false;
+            if (webView != active) {
+                deliverIdentityCallbacks(EzBookkeepingPageDetector.PageIdentity.UNKNOWN);
+                return;
+            }
             String currentUrl = active.getUrl();
-            if (identityUrl == null ? currentUrl != null : !identityUrl.equals(currentUrl)) return;
+            if (identityUrl == null ? currentUrl != null : !identityUrl.equals(currentUrl)) {
+                deliverIdentityCallbacks(EzBookkeepingPageDetector.PageIdentity.UNKNOWN);
+                return;
+            }
             cachedPageIdentity = EzBookkeepingPageDetector.parseIdentity(result);
             cachedIdentityUrl = identityUrl;
+            deliverIdentityCallbacks(cachedPageIdentity);
         });
+    }
+
+    private void deliverIdentityCallbacks(EzBookkeepingPageDetector.PageIdentity identity) {
+        if (pendingIdentityCallbacks.isEmpty()) return;
+        List<ValueCallback<EzBookkeepingPageDetector.PageIdentity>> callbacks =
+                new ArrayList<>(pendingIdentityCallbacks);
+        pendingIdentityCallbacks.clear();
+        for (ValueCallback<EzBookkeepingPageDetector.PageIdentity> callback : callbacks) {
+            callback.onReceiveValue(identity);
+        }
     }
 
     private boolean movedTooMuch(MotionEvent event) {
@@ -600,6 +638,8 @@ public final class WebViewController {
 
     public void destroy() {
         if (activeController.get() == this) activeController.clear();
+        identityCheckInProgress = false;
+        pendingIdentityCallbacks.clear();
         if (webView != null) {
             webView.removeCallbacks(pageIdentityRefresh);
             webView.setOnTouchListener(null);
