@@ -1,6 +1,6 @@
 # EZ记账
 
-**EZ记账**是一款面向自托管 [ezBookkeeping](https://github.com/mayswind/ezbookkeeping) 的轻量 Android 客户端。应用使用沉浸式 WebView 承载原始移动端界面，不在记账页面额外叠加标题栏或工具栏。
+**EZ记账**是一款面向自托管 [ezBookkeeping](https://github.com/mayswind/ezbookkeeping) 的轻量 Android 客户端。
 
 > 本项目是非官方客户端，不包含 ezBookkeeping 服务端，也不隶属于 ezBookkeeping 官方项目。
 
