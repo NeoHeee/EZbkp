@@ -77,7 +77,7 @@ public final class QuickActionsSheet {
         dialog.setCanceledOnTouchOutside(false);
 
         FrameLayout overlay = new FrameLayout(activity);
-        overlay.setPadding(dp(activity, 8), dp(activity, 24), dp(activity, 8),
+        overlay.setPadding(dp(activity, 8), dp(activity, 12), dp(activity, 8),
                 dp(activity, 8));
         overlay.setClickable(true);
         overlay.setFocusable(true);
@@ -86,8 +86,8 @@ public final class QuickActionsSheet {
 
         LinearLayout panel = new LinearLayout(activity);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(activity, 18), dp(activity, 16), dp(activity, 18),
-                dp(activity, 14));
+        panel.setPadding(dp(activity, 16), dp(activity, 12), dp(activity, 16),
+                dp(activity, 10));
         panel.setBackground(panelBackground(activity));
         panel.setClickable(true);
         panel.setFocusable(true);
@@ -106,7 +106,7 @@ public final class QuickActionsSheet {
 
         LinearLayout content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(0, dp(activity, 4), 0, dp(activity, 4));
+        content.setPadding(0, 0, 0, dp(activity, 2));
 
         addSectionHeading(activity, content, "快捷操作", "常用页面、线路与安全控制");
         addTileGrid(activity, content, Arrays.asList(
@@ -135,13 +135,13 @@ public final class QuickActionsSheet {
         TextView hint = text(activity, "更多选项已收纳至设置中心", 12,
                 UiTheme.tertiaryText(activity));
         hint.setGravity(Gravity.CENTER);
-        hint.setPadding(0, dp(activity, 10), 0, 0);
+        hint.setPadding(0, dp(activity, 4), 0, 0);
         panel.addView(hint, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         DisplayMetrics metrics = activity.getResources().getDisplayMetrics();
         int width = Math.min(metrics.widthPixels - dp(activity, 16), dp(activity, 600));
-        int height = Math.min((int) (metrics.heightPixels * 0.76f), dp(activity, 660));
+        int height = Math.min((int) (metrics.heightPixels * 0.92f), dp(activity, 700));
         FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
                 width, height, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         overlay.addView(panel, panelParams);
@@ -157,11 +157,11 @@ public final class QuickActionsSheet {
     private static View createHeader(Context context, Dialog dialog) {
         LinearLayout row = new LinearLayout(context);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(context, 2), 0, 0, dp(context, 12));
+        row.setPadding(dp(context, 2), 0, 0, dp(context, 8));
 
         LinearLayout texts = new LinearLayout(context);
         texts.setOrientation(LinearLayout.VERTICAL);
-        TextView title = text(context, "快捷中心", 22, UiTheme.primaryText(context));
+        TextView title = text(context, "快捷中心", 21, UiTheme.primaryText(context));
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         TextView subtitle = text(context, "页面、线路、安全与维护工具", 13,
                 UiTheme.secondaryText(context));
@@ -176,15 +176,15 @@ public final class QuickActionsSheet {
         close.setContentDescription("关闭快捷中心");
         close.setBackground(ripple(context, circleBackground(context)));
         close.setOnClickListener(view -> dialog.dismiss());
-        row.addView(close, new LinearLayout.LayoutParams(dp(context, 44), dp(context, 44)));
+        row.addView(close, new LinearLayout.LayoutParams(dp(context, 42), dp(context, 42)));
         return row;
     }
 
     private static View createStatusDashboard(Context context, Model model) {
         LinearLayout panel = new LinearLayout(context);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(context, 12), dp(context, 12), dp(context, 12),
-                dp(context, 12));
+        panel.setPadding(dp(context, 10), dp(context, 9), dp(context, 10),
+                dp(context, 9));
         panel.setBackground(statusBackground(context));
 
         TextView label = text(context, "当前状态", 12, UiTheme.secondaryText(context));
@@ -193,7 +193,7 @@ public final class QuickActionsSheet {
 
         LinearLayout firstRow = new LinearLayout(context);
         firstRow.setOrientation(LinearLayout.HORIZONTAL);
-        firstRow.setPadding(0, dp(context, 9), 0, 0);
+        firstRow.setPadding(0, dp(context, 6), 0, 0);
         firstRow.addView(statusCell(context, "选择方式", model.mode),
                 weightedCellParams(context, true));
         firstRow.addView(statusCell(context, "当前线路", model.route),
@@ -202,7 +202,7 @@ public final class QuickActionsSheet {
 
         LinearLayout secondRow = new LinearLayout(context);
         secondRow.setOrientation(LinearLayout.HORIZONTAL);
-        secondRow.setPadding(0, dp(context, 8), 0, 0);
+        secondRow.setPadding(0, dp(context, 6), 0, 0);
         secondRow.addView(statusCell(context, "最近延迟", model.latency),
                 weightedCellParams(context, true));
         secondRow.addView(statusCell(context, "安全保护", model.security),
@@ -230,13 +230,13 @@ public final class QuickActionsSheet {
     private static View statusCell(Context context, String label, String value) {
         LinearLayout cell = new LinearLayout(context);
         cell.setOrientation(LinearLayout.VERTICAL);
-        cell.setPadding(dp(context, 11), dp(context, 9), dp(context, 11), dp(context, 9));
+        cell.setPadding(dp(context, 10), dp(context, 7), dp(context, 10), dp(context, 7));
         cell.setBackground(statusCellBackground(context));
 
         TextView small = text(context, label, 11, UiTheme.tertiaryText(context));
         TextView main = text(context, value, 14, UiTheme.primaryText(context));
         main.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        main.setPadding(0, dp(context, 4), 0, 0);
+        main.setPadding(0, dp(context, 2), 0, 0);
         main.setMaxLines(1);
         cell.addView(small);
         cell.addView(main);
@@ -262,7 +262,7 @@ public final class QuickActionsSheet {
                                           String title, String subtitle) {
         LinearLayout heading = new LinearLayout(context);
         heading.setOrientation(LinearLayout.VERTICAL);
-        heading.setPadding(dp(context, 2), dp(context, 12), 0, dp(context, 8));
+        heading.setPadding(dp(context, 2), dp(context, 7), 0, dp(context, 5));
         TextView name = text(context, title, 14, UiTheme.primaryText(context));
         name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         TextView detail = text(context, subtitle, 11, UiTheme.tertiaryText(context));
@@ -291,7 +291,7 @@ public final class QuickActionsSheet {
 
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            rowParams.bottomMargin = dp(context, 8);
+            rowParams.bottomMargin = dp(context, 6);
             parent.addView(row, rowParams);
         }
     }
@@ -313,8 +313,8 @@ public final class QuickActionsSheet {
         LinearLayout tile = new LinearLayout(context);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.START);
-        tile.setPadding(dp(context, 12), dp(context, 12), dp(context, 12), dp(context, 11));
-        tile.setMinimumHeight(dp(context, 112));
+        tile.setPadding(dp(context, 10), dp(context, 8), dp(context, 10), dp(context, 8));
+        tile.setMinimumHeight(dp(context, 88));
         tile.setClickable(true);
         tile.setFocusable(true);
         tile.setBackground(ripple(context, tileBackground(context)));
@@ -328,14 +328,14 @@ public final class QuickActionsSheet {
         icon.setImageResource(item.icon);
         icon.setColorFilter(UiTheme.accent(context));
         icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        icon.setPadding(dp(context, 8), dp(context, 8), dp(context, 8), dp(context, 8));
+        icon.setPadding(dp(context, 7), dp(context, 7), dp(context, 7), dp(context, 7));
         icon.setBackground(iconBackground(context));
         icon.setContentDescription(null);
-        tile.addView(icon, new LinearLayout.LayoutParams(dp(context, 38), dp(context, 38)));
+        tile.addView(icon, new LinearLayout.LayoutParams(dp(context, 34), dp(context, 34)));
 
         TextView title = text(context, item.title, 14, UiTheme.primaryText(context));
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setPadding(0, dp(context, 9), 0, 0);
+        title.setPadding(0, dp(context, 5), 0, 0);
         tile.addView(title);
 
         TextView description = text(context, item.description, 11,
@@ -405,14 +405,14 @@ public final class QuickActionsSheet {
     private static GradientDrawable tileBackground(Context context) {
         GradientDrawable background = new GradientDrawable();
         background.setColor(UiTheme.surface(context));
-        background.setStroke(dp(context, 1), UiTheme.border(context));
+        background.setStroke(dp(context, 1), UiTheme.gold(context));
         background.setCornerRadius(dp(context, 16));
         return background;
     }
 
     private static GradientDrawable iconBackground(Context context) {
         GradientDrawable background = new GradientDrawable();
-        background.setColor(UiTheme.softAccent(context));
+        background.setColor(UiTheme.softGold(context));
         background.setCornerRadius(dp(context, 12));
         return background;
     }

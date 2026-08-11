@@ -130,7 +130,7 @@ public final class ServerSettingsPage {
 
         Button addRule = new Button(activity);
         addRule.setText("＋ 添加局域网地址");
-        UiComponents.styleSecondary(addRule);
+        UiComponents.styleGoldAction(addRule);
         addRule.setOnClickListener(view -> {
             addRuleRow(activity, ruleList, ruleInputs,
                     new LocalRouteRule("", currentSsid == null ? "" : currentSsid, ""),
@@ -291,19 +291,19 @@ public final class ServerSettingsPage {
         Button useWifi = new Button(activity);
         useWifi.setText("当前 Wi-Fi");
         useWifi.setContentDescription("使用当前 Wi-Fi 名称");
-        UiComponents.styleSecondary(useWifi);
+        UiComponents.styleGoldAction(useWifi);
         actions.addView(useWifi, weightedWrap(activity, 1f, 4));
 
         Button test = new Button(activity);
         test.setText("测试");
         test.setContentDescription("测试此局域网地址");
-        UiComponents.styleSecondary(test);
+        UiComponents.styleAccentAction(test);
         actions.addView(test, weightedWrap(activity, 1f, 4));
 
         Button remove = new Button(activity);
         remove.setText("删除");
         remove.setContentDescription("删除此局域网地址");
-        UiComponents.styleSecondary(remove);
+        UiComponents.styleDangerAction(remove);
         actions.addView(remove, weightedWrap(activity, 1f, 0));
         card.addView(actions, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
