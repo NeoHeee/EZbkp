@@ -24,7 +24,7 @@ import java.util.List;
 public final class ServerSettingsPage {
     public interface Listener {
         void onSaved(List<LocalRouteRule> localRules, String publicUrl);
-        void onWifiPermissionRequested();
+        void onWifiPermissionRequested(Runnable refreshAfterPermission);
         void onClose();
     }
 
@@ -90,7 +90,15 @@ public final class ServerSettingsPage {
             Button permission = new Button(activity);
             permission.setText("允许识别当前 Wi-Fi");
             UiComponents.styleSecondary(permission);
-            permission.setOnClickListener(view -> listener.onWifiPermissionRequested());
+            permission.setOnClickListener(view -> listener.onWifiPermissionRequested(() -> {
+                String refreshedSsid = WifiRouteContext.currentSsid(activity);
+                wifiStatus.setText(refreshedSsid == null ?
+                        "暂时无法识别当前 Wi-Fi，可手动填写名称" :
+                        "当前 Wi-Fi：" + refreshedSsid);
+                if (WifiRouteContext.canReadSsid(activity)) {
+                    permission.setVisibility(View.GONE);
+                }
+            }));
             content.addView(permission, fullWrap(activity, 12));
         }
 

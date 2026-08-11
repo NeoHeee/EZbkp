@@ -172,21 +172,33 @@ public final class WebViewController {
             callback.onReceiveValue(null);
             return;
         }
-        String cookie = CookieManager.getInstance().getCookie(pageUrl);
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.flush();
         Uri page = Uri.parse(pageUrl);
         Uri endpoint = page.buildUpon().path(ServerVersionDetector.API_PATH)
                 .clearQuery().fragment(null).build();
-        metadataExecutor.execute(() -> {
-            String version = fetchServerVersion(endpoint.toString(), cookie);
-            activity.runOnUiThread(() -> {
-                if (!activity.isFinishing() && !activity.isDestroyed()) {
-                    callback.onReceiveValue(version);
-                }
-            });
-        });
+        String endpointUrl = endpoint.toString();
+        String cookie = cookieManager.getCookie(endpointUrl);
+        String userAgent = webView.getSettings().getUserAgentString();
+        webView.evaluateJavascript(
+                "(function(){try{return sessionStorage.getItem('ebk_user_session_token')||" +
+                        "localStorage.getItem('ebk_user_token')||'';}catch(e){return '';}})();",
+                rawToken -> {
+                    String token = ServerVersionDetector.decodeJavascriptString(rawToken);
+                    metadataExecutor.execute(() -> {
+                        String version = fetchServerVersion(endpointUrl, cookie, userAgent,
+                                pageUrl, token);
+                        activity.runOnUiThread(() -> {
+                            if (!activity.isFinishing() && !activity.isDestroyed()) {
+                                callback.onReceiveValue(version);
+                            }
+                        });
+                    });
+                });
     }
 
-    private String fetchServerVersion(String endpoint, String cookie) {
+    private String fetchServerVersion(String endpoint, String cookie, String userAgent,
+                                      String referer, String token) {
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(endpoint).openConnection();
@@ -194,8 +206,19 @@ public final class WebViewController {
             connection.setConnectTimeout(5000);
             connection.setReadTimeout(5000);
             connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.7");
+            connection.setRequestProperty("X-Requested-With", "XMLHttpRequest");
+            if (userAgent != null && !userAgent.trim().isEmpty()) {
+                connection.setRequestProperty("User-Agent", userAgent);
+            }
+            if (referer != null && !referer.trim().isEmpty()) {
+                connection.setRequestProperty("Referer", referer);
+            }
             if (cookie != null && !cookie.isEmpty()) {
                 connection.setRequestProperty("Cookie", cookie);
+            }
+            if (token != null && !token.isEmpty()) {
+                connection.setRequestProperty("Authorization", "Bearer " + token);
             }
             if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) return null;
             StringBuilder body = new StringBuilder();

@@ -26,6 +26,8 @@ public class ServerVersionDetectorTest {
                 "{\"success\":true,\"result\":{\"version\":\"0.9.2\"}}"));
         assertNull(ServerVersionDetector.parseApiResponse(
                 "{\"success\":false,\"result\":{\"version\":\"0.9.2\"}}"));
+        assertEquals("0.8.0", ServerVersionDetector.parseApiResponse(
+                "{\"result\":{\"version\":\"0.8.0\"}}"));
         assertTrue(ServerVersionDetector.API_PATH.endsWith("/systems/version.json"));
     }
 }

@@ -75,6 +75,7 @@ public class MainActivity extends FragmentActivity implements
     private String cachedServerVersion;
     private boolean serverVersionDetectionAttempted;
     private boolean serverVersionRequestPending;
+    private Runnable pendingWifiPermissionRefresh;
 
     private final Runnable backgroundStartupProbe = this::runPendingBackgroundStartupProbe;
     private final Runnable progressivePageRetry = this::runProgressivePageRetry;
@@ -133,9 +134,12 @@ public class MainActivity extends FragmentActivity implements
                 boolean granted = Boolean.TRUE.equals(
                         result.get(Manifest.permission.ACCESS_FINE_LOCATION));
                 refreshLocalRouteForNetwork();
+                Runnable refresh = pendingWifiPermissionRefresh;
+                pendingWifiPermissionRefresh = null;
+                if (refresh != null) refresh.run();
                 if (granted) {
                     Toast.makeText(this,
-                            "已允许识别 Wi-Fi，重新进入连接页面即可显示当前名称",
+                            "Wi-Fi 识别权限已更新，可继续配置局域网地址",
                             Toast.LENGTH_LONG).show();
                 } else {
                     Toast.makeText(this,
@@ -479,7 +483,8 @@ public class MainActivity extends FragmentActivity implements
             }
 
             @Override
-            public void onWifiPermissionRequested() {
+            public void onWifiPermissionRequested(Runnable refreshAfterPermission) {
+                pendingWifiPermissionRefresh = refreshAfterPermission;
                 if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
                     wifiSsidPermissionLauncher.launch(new String[]{
                             Manifest.permission.ACCESS_FINE_LOCATION,
