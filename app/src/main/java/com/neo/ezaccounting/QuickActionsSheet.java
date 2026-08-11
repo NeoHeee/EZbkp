@@ -100,20 +100,23 @@ public final class QuickActionsSheet {
             if (decor == null) {
                 prewarming = false;
                 dialog.hide();
-                restoreVisibleWindow(activity, dialog);
+                configureHiddenWindow(dialog);
                 return;
             }
             decor.postOnAnimation(() -> decor.postOnAnimation(() -> {
                 if (!prewarming) return;
                 prewarming = false;
                 dialog.hide();
-                restoreVisibleWindow(activity, dialog);
+                configureHiddenWindow(dialog);
             }));
         }
 
         void hide() {
             prewarming = false;
-            if (dialog != null) dialog.hide();
+            if (dialog != null) {
+                dialog.hide();
+                configureHiddenWindow(dialog);
+            }
         }
 
         void release() {
