@@ -10,8 +10,9 @@ public class ShortcutActionNamesTest {
         assertTrue(ShortcutActions.ROUTES.startsWith("com.neo.ezaccounting.action."));
         assertTrue(ShortcutActions.SECURITY.startsWith("com.neo.ezaccounting.action."));
         assertTrue(ShortcutActions.LOCK.startsWith("com.neo.ezaccounting.action."));
-        assertTrue(ShortcutActions.UPDATE.startsWith("com.neo.ezaccounting.action."));
+        assertTrue(ShortcutActions.TOGGLE_QUICK_ACTIONS.startsWith(
+                "com.neo.ezaccounting.action."));
         assertTrue(!ShortcutActions.ROUTES.equals(ShortcutActions.SECURITY));
-        assertTrue(!ShortcutActions.LOCK.equals(ShortcutActions.UPDATE));
+        assertTrue(!ShortcutActions.LOCK.equals(ShortcutActions.TOGGLE_QUICK_ACTIONS));
     }
 }

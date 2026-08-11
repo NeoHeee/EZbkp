@@ -18,17 +18,17 @@ public class RouteManagerTest {
     }
 
     @Test
-    public void selectsPublicWhenItIsClearlyFaster() {
+    public void keepsMatchedLocalEvenWhenPublicIsFaster() {
         RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL, true, 600);
         RouteManager.ProbeResult remote = route("https://remote", RouteManager.TYPE_PUBLIC, true, 90);
-        assertEquals(remote, RouteManager.selectBest(local, remote, ""));
+        assertEquals(local, RouteManager.selectBest(local, remote, ""));
     }
 
     @Test
-    public void keepsLastRouteWithinTolerance() {
+    public void matchedLocalOverridesLastPublicRoute() {
         RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL, true, 160);
         RouteManager.ProbeResult remote = route("https://remote", RouteManager.TYPE_PUBLIC, true, 80);
-        assertEquals(remote, RouteManager.selectBest(local, remote, "https://remote"));
+        assertEquals(local, RouteManager.selectBest(local, remote, "https://remote"));
     }
 
     @Test

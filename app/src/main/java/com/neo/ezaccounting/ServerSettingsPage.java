@@ -5,7 +5,9 @@ import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -14,14 +16,26 @@ import android.view.WindowInsets;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+
 public final class ServerSettingsPage {
+    public interface AddressTestCallback {
+        void onResult(boolean reachable, String detail);
+    }
+
     public interface Listener {
-        void onSaved(String localUrl, String publicUrl);
+        void onSaved(List<LocalRouteRule> localRules, String publicUrl);
+        void onWifiPermissionRequested(Runnable refreshAfterPermission);
+        void onTestAddress(String url, AddressTestCallback callback);
+        void onClose();
     }
 
     private static final class ImeState {
@@ -30,7 +44,8 @@ public final class ServerSettingsPage {
 
     private ServerSettingsPage() {}
 
-    public static View create(Activity activity, String localUrl, String publicUrl,
+    public static View create(Activity activity, List<LocalRouteRule> localRules,
+                              String publicUrl, String activeLocalUrl,
                               Listener listener) {
         ScrollView scrollView = new ScrollView(activity);
         scrollView.setFillViewport(true);
@@ -41,77 +56,114 @@ public final class ServerSettingsPage {
         LinearLayout content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER_HORIZONTAL);
-        content.setPadding(dp(activity, 28), dp(activity, 42), dp(activity, 28), dp(activity, 28));
+        content.setPadding(dp(activity, UiComponents.PAGE_HORIZONTAL_DP),
+                dp(activity, UiComponents.PAGE_TOP_DP),
+                dp(activity, UiComponents.PAGE_HORIZONTAL_DP),
+                dp(activity, UiComponents.PAGE_BOTTOM_DP));
         scrollView.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        ImageView logo = new ImageView(activity);
-        logo.setImageDrawable(activity.getApplicationInfo().loadIcon(activity.getPackageManager()));
-        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        logo.setAdjustViewBounds(true);
-        logo.setContentDescription("EZ记账应用图标");
-        LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(
-                dp(activity, 84), dp(activity, 84));
-        logoParams.bottomMargin = dp(activity, 24);
-        content.addView(logo, logoParams);
-
-        TextView title = text(activity, "配置 ezBookkeeping 地址", 24,
+        LinearLayout header = new LinearLayout(activity);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = text(activity, "连接与线路", 28,
                 UiTheme.primaryText(activity), true);
-        title.setGravity(Gravity.CENTER);
-        content.addView(title, fullWrap(activity, 10));
+        header.addView(title, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView close = text(activity, "×", 28, UiTheme.secondaryText(activity), false);
+        UiComponents.styleIconButton(close);
+        close.setContentDescription("返回设置中心");
+        close.setOnClickListener(view -> listener.onClose());
+        header.addView(close, new LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)));
+        content.addView(header, fullWrap(activity, 10));
 
         TextView description = text(activity,
-                "可同时填写本地地址和公网地址。自动模式会并行测速，并在满足防抖条件后切换线路。\n\n" +
-                        "建议：\n本地地址填写 NAS 局域网地址\n公网地址填写反向代理 HTTPS 地址",
+                "配置本地和公网服务器地址。自动模式会检测可用性并选择合适线路。",
                 14.5f, UiTheme.secondaryText(activity), false);
-        description.setGravity(Gravity.CENTER);
         description.setLineSpacing(0, 1.18f);
         content.addView(description, fullWrap(activity, 24));
 
-        content.addView(text(activity, "本地地址", 14.5f,
-                UiTheme.primaryText(activity), true), fullWrap(activity, 8));
-        EditText localInput = input(activity, "http://192.168.1.100:8080", localUrl);
-        localInput.setImeOptions(EditorInfo.IME_ACTION_NEXT);
-        content.addView(localInput, fullWrap(activity, 16));
+        ImeState imeState = new ImeState();
+        installImeAwareScrolling(activity, scrollView, imeState);
 
-        content.addView(text(activity, "公网地址", 14.5f,
-                UiTheme.primaryText(activity), true), fullWrap(activity, 8));
+        TextView localLabel = text(activity, "局域网地址", 14.5f,
+                UiTheme.primaryText(activity), true);
+        content.addView(localLabel, fullWrap(activity, 8));
+
+        String currentSsid = WifiRouteContext.currentSsid(activity);
+        TextView wifiStatus = text(activity,
+                currentSsid == null ? "按 Wi-Fi 名称自动选择局域网地址" :
+                        "当前 Wi-Fi：" + currentSsid,
+                13, UiTheme.secondaryText(activity), false);
+        content.addView(wifiStatus, fullWrap(activity, 10));
+
+        if (!WifiRouteContext.canReadSsid(activity)) {
+            Button permission = new Button(activity);
+            permission.setText("允许识别当前 Wi-Fi");
+            UiComponents.styleSecondary(permission);
+            permission.setOnClickListener(view -> listener.onWifiPermissionRequested(() -> {
+                String refreshedSsid = WifiRouteContext.currentSsid(activity);
+                wifiStatus.setText(refreshedSsid == null ?
+                        "暂时无法识别当前 Wi-Fi，可手动填写名称" :
+                        "当前 Wi-Fi：" + refreshedSsid);
+                if (WifiRouteContext.canReadSsid(activity)) {
+                    permission.setVisibility(View.GONE);
+                }
+            }));
+            content.addView(permission, fullWrap(activity, 12));
+        }
+
+        LinearLayout ruleList = new LinearLayout(activity);
+        ruleList.setOrientation(LinearLayout.VERTICAL);
+        content.addView(ruleList, fullWrap(activity, 10));
+        List<RuleInputs> ruleInputs = new ArrayList<>();
+        List<LocalRouteRule> initialRules = localRules == null ?
+                new ArrayList<>() : new ArrayList<>(localRules);
+        if (initialRules.isEmpty()) initialRules.add(new LocalRouteRule("", ""));
+        LocalRouteRule activeRule = activeLocalUrl == null ? null :
+                LocalRouteRules.selectRule(initialRules, currentSsid,
+                        WifiRouteContext.isWifiConnected(activity));
+        for (LocalRouteRule rule : initialRules) {
+            boolean active = rule.equals(activeRule) && rule.url.equals(activeLocalUrl);
+            addRuleRow(activity, ruleList, ruleInputs, rule, currentSsid, active,
+                    scrollView, imeState, listener);
+        }
+
+        Button addRule = new Button(activity);
+        addRule.setText("＋ 添加局域网地址");
+        UiComponents.styleSecondary(addRule);
+        addRule.setOnClickListener(view -> {
+            addRuleRow(activity, ruleList, ruleInputs,
+                    new LocalRouteRule("", currentSsid == null ? "" : currentSsid, ""),
+                    currentSsid, false, scrollView, imeState, listener);
+            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
+        });
+        content.addView(addRule, fullWrap(activity, 18));
+
+        TextView publicLabel = text(activity, "公网地址 · 未匹配或本地不可用时使用", 14.5f,
+                UiTheme.primaryText(activity), true);
         EditText publicInput = input(activity, "https://money.example.com", publicUrl);
+        publicInput.setId(View.generateViewId());
+        publicLabel.setLabelFor(publicInput.getId());
+        content.addView(publicLabel, fullWrap(activity, 8));
         publicInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
         content.addView(publicInput, fullWrap(activity, 18));
 
         Button save = new Button(activity);
         save.setText("保存并连接");
         save.setTextSize(16);
-        save.setTextColor(Color.WHITE);
-        save.setAllCaps(false);
-        GradientDrawable saveBackground = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{Color.rgb(15, 118, 110), Color.rgb(13, 148, 136)});
-        saveBackground.setCornerRadius(dp(activity, 14));
-        save.setBackground(saveBackground);
+        UiComponents.stylePrimary(save);
         content.addView(save, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 52)));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView note = text(activity,
-                "进入记账界面后不会显示额外顶部栏。\n可在快捷中心刷新页面；双指快速双击可打开隐藏菜单。\n" +
+                "可在快捷中心刷新页面；双指快速双击可打开隐藏菜单。\n" +
                         "HTTPS证书无效时会阻止连接。地址和安全设置只保存在本机。",
                 12.5f, UiTheme.tertiaryText(activity), false);
         note.setGravity(Gravity.CENTER);
         note.setLineSpacing(0, 1.15f);
         content.addView(note, fullWrap(activity, 22));
 
-        ImeState imeState = new ImeState();
-        installImeAwareScrolling(activity, scrollView, imeState);
-        keepVisibleAboveKeyboard(activity, scrollView, localInput, imeState);
         keepVisibleAboveKeyboard(activity, scrollView, publicInput, imeState);
-
-        localInput.setOnEditorActionListener((view, actionId, event) -> {
-            if (actionId != EditorInfo.IME_ACTION_NEXT) return false;
-            publicInput.requestFocus();
-            scrollFocusedFieldIntoView(activity, scrollView, publicInput, imeState);
-            return true;
-        });
 
         publicInput.setOnEditorActionListener((view, actionId, event) -> {
             if (actionId != EditorInfo.IME_ACTION_DONE) return false;
@@ -120,32 +172,196 @@ public final class ServerSettingsPage {
         });
 
         save.setOnClickListener(v -> {
-            String localRaw = localInput.getText().toString();
             String publicRaw = publicInput.getText().toString();
-            if (blank(localRaw) && blank(publicRaw)) {
-                localInput.setError("请至少填写一个地址");
-                localInput.requestFocus();
-                scrollFocusedFieldIntoView(activity, scrollView, localInput, imeState);
+            List<LocalRouteRule> normalizedRules = new ArrayList<>();
+            Set<String> usedSsids = new HashSet<>();
+            for (RuleInputs fields : new ArrayList<>(ruleInputs)) {
+                String raw = fields.url.getText().toString();
+                if (blank(raw)) continue;
+                String ssidValue = fields.ssid.getText().toString().trim();
+                String ssidKey = ssidValue.toLowerCase(Locale.ROOT);
+                if (!usedSsids.add(ssidKey)) {
+                    fields.ssid.setError(ssidKey.isEmpty() ?
+                            "只能设置一个默认地址" : "该 Wi-Fi 已经配置过地址");
+                    fields.ssid.requestFocus();
+                    scrollFocusedFieldIntoView(activity, scrollView, fields.ssid, imeState);
+                    return;
+                }
+                String normalized = ServerAddressValidator.normalize(raw);
+                if (normalized == null) {
+                    fields.url.setError("请输入有效的 HTTP 或 HTTPS 地址");
+                    fields.url.requestFocus();
+                    scrollFocusedFieldIntoView(activity, scrollView, fields.url, imeState);
+                    return;
+                }
+                normalizedRules.add(new LocalRouteRule(
+                        fields.name.getText().toString(), ssidValue, normalized));
+            }
+            if (normalizedRules.isEmpty() && blank(publicRaw)) {
+                publicInput.setError("请至少填写一个局域网或公网地址");
+                publicInput.requestFocus();
+                scrollFocusedFieldIntoView(activity, scrollView, publicInput, imeState);
                 return;
             }
-            String normalizedLocal = ServerAddressValidator.normalize(localRaw);
             String normalizedPublic = ServerAddressValidator.normalize(publicRaw);
-            if (!blank(localRaw) && normalizedLocal == null) {
-                localInput.setError("请输入有效的 HTTP 或 HTTPS 地址");
-                localInput.requestFocus();
-                scrollFocusedFieldIntoView(activity, scrollView, localInput, imeState);
-                return;
-            }
             if (!blank(publicRaw) && normalizedPublic == null) {
                 publicInput.setError("请输入有效的 HTTP 或 HTTPS 地址");
                 publicInput.requestFocus();
                 scrollFocusedFieldIntoView(activity, scrollView, publicInput, imeState);
                 return;
             }
-            listener.onSaved(normalizedLocal == null ? "" : normalizedLocal,
+            listener.onSaved(normalizedRules,
                     normalizedPublic == null ? "" : normalizedPublic);
         });
         return scrollView;
+    }
+
+    private static final class RuleInputs {
+        final EditText name;
+        final EditText ssid;
+        final EditText url;
+
+        RuleInputs(EditText name, EditText ssid, EditText url) {
+            this.name = name;
+            this.ssid = ssid;
+            this.url = url;
+        }
+    }
+
+    private static void addRuleRow(Activity activity, LinearLayout ruleList,
+                                   List<RuleInputs> inputs, LocalRouteRule rule,
+                                   String currentSsid, boolean active,
+                                   ScrollView scrollView, ImeState imeState, Listener listener) {
+        LinearLayout card = new LinearLayout(activity);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(activity, 12), dp(activity, 12), dp(activity, 12), dp(activity, 12));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(UiTheme.surface(activity));
+        background.setStroke(dp(activity, 1), UiTheme.border(activity));
+        background.setCornerRadius(dp(activity, 16));
+        card.setBackground(background);
+
+        TextView state = text(activity, active ? "使用中" :
+                        (rule.isDefault() ? "默认地址" : "指定 Wi-Fi"),
+                12.5f, active ? UiTheme.accent(activity) : UiTheme.secondaryText(activity),
+                active);
+        state.setContentDescription(active ? "当前正在使用此局域网地址" : null);
+        card.addView(state, fullWrap(activity, 8));
+
+        EditText name = input(activity, "规则名称，例如：家里", rule.name);
+        name.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        name.setContentDescription("规则名称");
+        name.setImeOptions(EditorInfo.IME_ACTION_NEXT);
+        card.addView(name, fullWrap(activity, 10));
+
+        EditText ssid = input(activity,
+                currentSsid == null ? "Wi-Fi 名称；留空作为默认地址" : currentSsid,
+                rule.ssid);
+        ssid.setInputType(InputType.TYPE_CLASS_TEXT);
+        ssid.setContentDescription("Wi-Fi 名称");
+        ssid.setImeOptions(EditorInfo.IME_ACTION_NEXT);
+        if (!active) {
+            ssid.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence value, int start,
+                                                        int count, int after) {}
+                @Override public void onTextChanged(CharSequence value, int start,
+                                                     int before, int count) {}
+                @Override public void afterTextChanged(Editable value) {
+                    state.setText(value.toString().trim().isEmpty() ?
+                            "默认地址" : "指定 Wi-Fi");
+                }
+            });
+        }
+        card.addView(ssid, fullWrap(activity, 10));
+
+        EditText url = input(activity, "http://192.168.1.100:8080", rule.url);
+        url.setContentDescription("局域网服务器地址");
+        url.setImeOptions(EditorInfo.IME_ACTION_NEXT);
+        card.addView(url, fullWrap(activity, 8));
+
+        TextView testStatus = text(activity, "", 12.5f,
+                UiTheme.secondaryText(activity), false);
+        testStatus.setVisibility(View.GONE);
+        card.addView(testStatus, fullWrap(activity, 6));
+
+        LinearLayout actions = new LinearLayout(activity);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button useWifi = new Button(activity);
+        useWifi.setText("当前 Wi-Fi");
+        useWifi.setContentDescription("使用当前 Wi-Fi 名称");
+        UiComponents.styleSecondary(useWifi);
+        actions.addView(useWifi, weightedWrap(activity, 1f, 4));
+
+        Button test = new Button(activity);
+        test.setText("测试");
+        test.setContentDescription("测试此局域网地址");
+        UiComponents.styleSecondary(test);
+        actions.addView(test, weightedWrap(activity, 1f, 4));
+
+        Button remove = new Button(activity);
+        remove.setText("删除");
+        remove.setContentDescription("删除此局域网地址");
+        UiComponents.styleSecondary(remove);
+        actions.addView(remove, weightedWrap(activity, 1f, 0));
+        card.addView(actions, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        RuleInputs fields = new RuleInputs(name, ssid, url);
+        inputs.add(fields);
+        useWifi.setOnClickListener(view -> fillCurrentWifi(activity, ssid, listener));
+        test.setOnClickListener(view -> {
+            String normalized = ServerAddressValidator.normalize(url.getText().toString());
+            if (normalized == null) {
+                url.setError("请先输入有效的 HTTP 或 HTTPS 地址");
+                url.requestFocus();
+                return;
+            }
+            test.setEnabled(false);
+            testStatus.setText("正在测试连接…");
+            testStatus.setTextColor(UiTheme.secondaryText(activity));
+            testStatus.setVisibility(View.VISIBLE);
+            listener.onTestAddress(normalized, (reachable, detail) -> {
+                if (!test.isAttachedToWindow()) return;
+                test.setEnabled(true);
+                testStatus.setText((reachable ? "连接正常 · " : "连接失败 · ") + detail);
+                testStatus.setTextColor(reachable ?
+                        UiTheme.accent(activity) :
+                        (UiTheme.isDark(activity) ? Color.rgb(248, 113, 113) :
+                                Color.rgb(185, 28, 28)));
+            });
+        });
+        remove.setOnClickListener(view -> {
+            inputs.remove(fields);
+            ruleList.removeView(card);
+        });
+        keepVisibleAboveKeyboard(activity, scrollView, name, imeState);
+        keepVisibleAboveKeyboard(activity, scrollView, ssid, imeState);
+        keepVisibleAboveKeyboard(activity, scrollView, url, imeState);
+        ruleList.addView(card, fullWrap(activity, 10));
+    }
+
+    private static void fillCurrentWifi(Activity activity, EditText ssid, Listener listener) {
+        String current = WifiRouteContext.currentSsid(activity);
+        if (current != null) {
+            ssid.setText(current);
+            ssid.setSelection(current.length());
+            return;
+        }
+        if (!WifiRouteContext.canReadSsid(activity)) {
+            listener.onWifiPermissionRequested(() -> {
+                String refreshed = WifiRouteContext.currentSsid(activity);
+                if (refreshed != null && ssid.isAttachedToWindow()) {
+                    ssid.setText(refreshed);
+                    ssid.setSelection(refreshed.length());
+                }
+            });
+            return;
+        }
+        android.widget.Toast.makeText(activity,
+                "暂时无法读取 Wi-Fi 名称，请确认已连接 Wi-Fi 且系统定位已开启",
+                android.widget.Toast.LENGTH_LONG).show();
     }
 
     private static void installImeAwareScrolling(Activity activity, ScrollView scrollView,
@@ -301,6 +517,14 @@ public final class ServerSettingsPage {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         params.bottomMargin = dp(activity, bottomDp);
+        return params;
+    }
+
+    private static LinearLayout.LayoutParams weightedWrap(Activity activity, float weight,
+                                                           int endMarginDp) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, weight);
+        params.setMarginEnd(dp(activity, endMarginDp));
         return params;
     }
 

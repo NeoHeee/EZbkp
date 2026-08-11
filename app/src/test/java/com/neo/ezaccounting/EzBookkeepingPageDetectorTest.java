@@ -31,6 +31,17 @@ public class EzBookkeepingPageDetectorTest {
     }
 
     @Test
+    public void cachedIdentityTakesPriorityAndUnknownFallsBackToUrl() {
+        assertTrue(EzBookkeepingPageDetector.resolveHome(
+                EzBookkeepingPageDetector.PageIdentity.HOME, false));
+        assertFalse(EzBookkeepingPageDetector.resolveHome(
+                EzBookkeepingPageDetector.PageIdentity.OTHER, true));
+        assertTrue(EzBookkeepingPageDetector.resolveHome(
+                EzBookkeepingPageDetector.PageIdentity.UNKNOWN, true));
+        assertFalse(EzBookkeepingPageDetector.resolveHome(null, false));
+    }
+
+    @Test
     public void scriptTargetsOnlyCurrentPageOwnedByMainView() {
         String script = EzBookkeepingPageDetector.homeDetectionScript();
         assertTrue(script.contains("getElementById('main-view')"));

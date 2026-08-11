@@ -10,11 +10,13 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -29,6 +31,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.fragment.app.FragmentActivity;
 
 import java.net.URI;
+import java.util.List;
 
 public class MainActivity extends FragmentActivity implements
         RouteCoordinator.Host,
@@ -38,22 +41,44 @@ public class MainActivity extends FragmentActivity implements
 
     private static final String PREFS = "ez_accounting_prefs";
     private static final String KEY_LOCAL_URL = "local_url";
+    private static final String KEY_LOCAL_ROUTE_RULES = "local_route_rules";
     private static final String KEY_PUBLIC_URL = "public_url";
     private static final String KEY_LAST_UPDATE_CHECK = "last_update_check";
+    private static final String KEY_SHOW_QUICK_ACTIONS = "show_quick_actions";
     private static final String STATE_KEY = "app_state";
     private static final String WEB_URL_KEY = "web_url";
     private static final String BASE_URL_KEY = "base_url";
+    private static final String WEB_VIEW_STATE_KEY = "web_view_state";
     private static final long AUTO_UPDATE_INTERVAL_MS = 24L * 60L * 60L * 1000L;
+    private static final long BACKGROUND_STARTUP_PROBE_FALLBACK_MS = 2500L;
+    private static final long PROGRESSIVE_PAGE_RETRY_DELAY_MS = 900L;
 
     private SharedPreferences preferences;
     private String localUrl;
     private String publicUrl;
+    private List<LocalRouteRule> localRouteRules;
     private String pendingShortcutAction;
     private String lastWebUrl;
     private String restoredBaseUrl;
     private long lastBackPressedAt;
     private boolean screenReceiverRegistered;
     private boolean serverSettingsVisible;
+    private boolean backgroundStartupProbePending;
+    private int consecutivePageFailures;
+    private FrameLayout appRoot;
+    private FrameLayout webLayer;
+    private FrameLayout overlayLayer;
+    private TextView recoveryBanner;
+    private TextView quickActionsButton;
+    private Bundle pendingWebViewState;
+    private boolean quickActionsEnabled = true;
+    private String cachedServerVersion;
+    private boolean serverVersionDetectionAttempted;
+    private boolean serverVersionRequestPending;
+    private Runnable pendingWifiPermissionRefresh;
+
+    private final Runnable backgroundStartupProbe = this::runPendingBackgroundStartupProbe;
+    private final Runnable progressivePageRetry = this::runProgressivePageRetry;
 
     private ValueCallback<Uri[]> filePathCallback;
     private Uri pendingCameraUri;
@@ -104,6 +129,25 @@ public class MainActivity extends FragmentActivity implements
                 }
             });
 
+    private final ActivityResultLauncher<String[]> wifiSsidPermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
+                boolean granted = Boolean.TRUE.equals(
+                        result.get(Manifest.permission.ACCESS_FINE_LOCATION));
+                refreshLocalRouteForNetwork();
+                Runnable refresh = pendingWifiPermissionRefresh;
+                pendingWifiPermissionRefresh = null;
+                if (refresh != null) refresh.run();
+                if (granted) {
+                    Toast.makeText(this,
+                            "Wi-Fi 识别权限已更新，可继续配置局域网地址",
+                            Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(this,
+                            "未获得定位权限，将在无法识别 Wi-Fi 时使用公网地址",
+                            Toast.LENGTH_LONG).show();
+                }
+            });
+
     private final BroadcastReceiver screenOffReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -119,15 +163,24 @@ public class MainActivity extends FragmentActivity implements
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         UiTheme.applySystemBars(this);
+        createPersistentRoot();
 
         preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
-        localUrl = preferences.getString(KEY_LOCAL_URL, "");
+        String legacyLocalUrl = preferences.getString(KEY_LOCAL_URL, "");
+        localRouteRules = LocalRouteRules.decode(
+                preferences.getString(KEY_LOCAL_ROUTE_RULES, ""), legacyLocalUrl);
+        localUrl = LocalRouteRules.select(localRouteRules,
+                WifiRouteContext.currentSsid(this), WifiRouteContext.isWifiConnected(this));
         publicUrl = preferences.getString(KEY_PUBLIC_URL, "");
+        quickActionsEnabled = preferences.getBoolean(KEY_SHOW_QUICK_ACTIONS, true);
+        updateQuickActionsVisibility();
         pendingShortcutAction = ShortcutActions.read(getIntent());
         lastWebUrl = savedInstanceState == null ? null :
                 savedInstanceState.getString(WEB_URL_KEY);
         restoredBaseUrl = savedInstanceState == null ? null :
                 savedInstanceState.getString(BASE_URL_KEY);
+        pendingWebViewState = savedInstanceState == null ? null :
+                savedInstanceState.getBundle(WEB_VIEW_STATE_KEY);
 
         AppStateMachine.State restored = AppStateMachine.restore(
                 savedInstanceState == null ? null : savedInstanceState.getString(STATE_KEY),
@@ -149,6 +202,128 @@ public class MainActivity extends FragmentActivity implements
             pendingShortcutAction = null;
         }
         handleLifecycleAction(lifecycleCoordinator.onCreate(AppSecurity.isEnabled(this)));
+    }
+
+    private void createPersistentRoot() {
+        appRoot = new FrameLayout(this);
+        appRoot.setBackgroundColor(UiTheme.background(this));
+
+        webLayer = new FrameLayout(this);
+        webLayer.setBackgroundColor(UiTheme.webBackground(this));
+        appRoot.addView(webLayer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        overlayLayer = new FrameLayout(this);
+        overlayLayer.setVisibility(View.GONE);
+        appRoot.addView(overlayLayer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        quickActionsButton = new TextView(this);
+        quickActionsButton.setText("⋮");
+        quickActionsButton.setTextSize(28);
+        quickActionsButton.setTextColor(Color.WHITE);
+        quickActionsButton.setGravity(Gravity.CENTER);
+        quickActionsButton.setMinWidth(dp(48));
+        quickActionsButton.setMinHeight(dp(64));
+        quickActionsButton.setPadding(dp(8), dp(8), dp(8), dp(8));
+        quickActionsButton.setContentDescription("打开快捷中心");
+        quickActionsButton.setTooltipText("快捷中心");
+        quickActionsButton.setElevation(dp(8));
+        GradientDrawable quickBackground = new GradientDrawable();
+        int accent = UiTheme.accent(this);
+        quickBackground.setColor(Color.argb(224, Color.red(accent),
+                Color.green(accent), Color.blue(accent)));
+        quickBackground.setCornerRadii(new float[]{dp(22), dp(22), 0, 0,
+                0, 0, dp(22), dp(22)});
+        quickActionsButton.setBackground(quickBackground);
+        quickActionsButton.setOnClickListener(view -> openQuickActions());
+        FrameLayout.LayoutParams quickParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.END | Gravity.CENTER_VERTICAL);
+        quickParams.setMargins(dp(16), dp(16), 0, dp(16));
+        appRoot.addView(quickActionsButton, quickParams);
+
+        recoveryBanner = new TextView(this);
+        recoveryBanner.setTextSize(14);
+        recoveryBanner.setTextColor(Color.WHITE);
+        recoveryBanner.setGravity(Gravity.CENTER_VERTICAL);
+        recoveryBanner.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        recoveryBanner.setPadding(dp(16), dp(12), dp(16), dp(12));
+        GradientDrawable bannerBackground = new GradientDrawable();
+        bannerBackground.setColor(Color.rgb(180, 83, 9));
+        bannerBackground.setCornerRadius(dp(14));
+        recoveryBanner.setBackground(bannerBackground);
+        recoveryBanner.setElevation(dp(8));
+        recoveryBanner.setVisibility(View.GONE);
+        FrameLayout.LayoutParams bannerParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM);
+        bannerParams.setMargins(dp(16), dp(16), dp(16), dp(24));
+        appRoot.addView(recoveryBanner, bannerParams);
+
+        setContentView(appRoot);
+    }
+
+    private void showOverlay(View content) {
+        overlayLayer.removeAllViews();
+        overlayLayer.addView(content, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        overlayLayer.setAlpha(1f);
+        overlayLayer.setVisibility(View.VISIBLE);
+        overlayLayer.bringToFront();
+        recoveryBanner.bringToFront();
+        quickActionsButton.setVisibility(View.GONE);
+        hideRecoveryBanner();
+    }
+
+    private void hideOverlay() {
+        overlayLayer.removeAllViews();
+        overlayLayer.setVisibility(View.GONE);
+        updateQuickActionsVisibility();
+    }
+
+    private void showRecoveryBanner(String text) {
+        if (recoveryBanner == null) return;
+        recoveryBanner.animate().cancel();
+        recoveryBanner.setText(text);
+        recoveryBanner.setAlpha(0f);
+        recoveryBanner.setTranslationY(dp(12));
+        recoveryBanner.setVisibility(View.VISIBLE);
+        recoveryBanner.bringToFront();
+        quickActionsButton.setVisibility(View.GONE);
+        recoveryBanner.animate().alpha(1f).translationY(0f).setDuration(180L).start();
+        recoveryBanner.announceForAccessibility(text);
+    }
+
+    private void hideRecoveryBanner() {
+        if (recoveryBanner == null || recoveryBanner.getVisibility() != View.VISIBLE) return;
+        recoveryBanner.animate().cancel();
+        recoveryBanner.setVisibility(View.GONE);
+        recoveryBanner.setAlpha(1f);
+        recoveryBanner.setTranslationY(0f);
+        updateQuickActionsVisibility();
+    }
+
+    private void updateQuickActionsVisibility() {
+        if (quickActionsButton == null || overlayLayer == null || recoveryBanner == null) return;
+        boolean visible = quickActionsEnabled &&
+                overlayLayer.getVisibility() != View.VISIBLE &&
+                recoveryBanner.getVisibility() != View.VISIBLE;
+        quickActionsButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (visible) quickActionsButton.bringToFront();
+    }
+
+    private void runProgressivePageRetry() {
+        if (consecutivePageFailures != 1 || serverSettingsVisible || isFinishing() ||
+                isDestroyed() || !webViewController.isCreated()) return;
+        showRecoveryBanner("连接仍不稳定，正在重试当前页面…");
+        webViewController.reload();
+    }
+
+    private void scheduleProgressivePageRetry() {
+        getWindow().getDecorView().removeCallbacks(progressivePageRetry);
+        getWindow().getDecorView().postDelayed(progressivePageRetry,
+                PROGRESSIVE_PAGE_RETRY_DELAY_MS);
     }
 
     @Override
@@ -208,10 +383,17 @@ public class MainActivity extends FragmentActivity implements
     }
 
     private void scheduleBackgroundStartupProbe() {
-        getWindow().getDecorView().postDelayed(() -> {
-            if (isFinishing() || isDestroyed() || serverSettingsVisible) return;
-            routeCoordinator.requestCheck(RouteCoordinator.Trigger.BACKGROUND_STARTUP);
-        }, 300L);
+        backgroundStartupProbePending = true;
+        getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
+        getWindow().getDecorView().postDelayed(backgroundStartupProbe,
+                BACKGROUND_STARTUP_PROBE_FALLBACK_MS);
+    }
+
+    private void runPendingBackgroundStartupProbe() {
+        if (!backgroundStartupProbePending || isFinishing() || isDestroyed() ||
+                serverSettingsVisible) return;
+        backgroundStartupProbePending = false;
+        routeCoordinator.requestCheck(RouteCoordinator.Trigger.BACKGROUND_STARTUP);
     }
 
     private void handlePendingShortcutAction() {
@@ -229,9 +411,17 @@ public class MainActivity extends FragmentActivity implements
             }
         } else if (ShortcutActions.LOCK.equals(action)) {
             lockImmediately();
-        } else if (ShortcutActions.UPDATE.equals(action)) {
-            checkForUpdates(true);
+        } else if (ShortcutActions.TOGGLE_QUICK_ACTIONS.equals(action)) {
+            toggleQuickActions();
         }
+    }
+
+    private void toggleQuickActions() {
+        quickActionsEnabled = !quickActionsEnabled;
+        preferences.edit().putBoolean(KEY_SHOW_QUICK_ACTIONS, quickActionsEnabled).apply();
+        updateQuickActionsVisibility();
+        Toast.makeText(this, quickActionsEnabled ?
+                "快捷入口已显示" : "快捷入口已隐藏", Toast.LENGTH_SHORT).show();
     }
 
     private void requestAppUnlock() {
@@ -269,22 +459,168 @@ public class MainActivity extends FragmentActivity implements
 
     private void showServerSettings() {
         rememberCurrentWebUrl();
-        webViewController.destroy();
         serverSettingsVisible = true;
         stateBeforeSettings = stateMachine.getState();
         transitionTo(AppStateMachine.State.SETTINGS);
-        setContentView(ServerSettingsPage.create(this, localUrl, publicUrl,
-                (savedLocal, savedPublic) -> {
-                    localUrl = savedLocal;
-                    publicUrl = savedPublic;
-                    preferences.edit()
-                            .putString(KEY_LOCAL_URL, localUrl)
-                            .putString(KEY_PUBLIC_URL, publicUrl)
-                            .apply();
-                    routeCoordinator.setAddresses(localUrl, publicUrl);
-                    serverSettingsVisible = false;
-                    lastFailure = null;
-                    routeCoordinator.requestCheck(RouteCoordinator.Trigger.RETRY);
+        String activeLocalUrl = routeCoordinator.getActiveType() == RouteManager.TYPE_LOCAL ?
+                routeCoordinator.getActiveUrl() : null;
+        showOverlay(ServerSettingsPage.create(this, localRouteRules, publicUrl, activeLocalUrl,
+                new ServerSettingsPage.Listener() {
+            @Override
+            public void onSaved(List<LocalRouteRule> savedRules, String savedPublic) {
+                localRouteRules = savedRules;
+                publicUrl = savedPublic;
+                refreshLocalRouteForNetwork();
+                preferences.edit()
+                        .putString(KEY_LOCAL_URL, localUrl)
+                        .putString(KEY_LOCAL_ROUTE_RULES, LocalRouteRules.encode(localRouteRules))
+                        .putString(KEY_PUBLIC_URL, publicUrl)
+                        .apply();
+                routeCoordinator.setAddresses(localUrl, publicUrl);
+                serverSettingsVisible = false;
+                lastFailure = null;
+                hideOverlay();
+                transitionTo(AppStateMachine.State.CHECKING_ROUTE);
+                routeCoordinator.requestCheck(RouteCoordinator.Trigger.RETRY);
+            }
+
+            @Override
+            public void onWifiPermissionRequested(Runnable refreshAfterPermission) {
+                pendingWifiPermissionRefresh = refreshAfterPermission;
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+                    wifiSsidPermissionLauncher.launch(new String[]{
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION});
+                } else {
+                    wifiSsidPermissionLauncher.launch(new String[]{
+                            Manifest.permission.ACCESS_FINE_LOCATION});
+                }
+            }
+
+            @Override
+            public void onTestAddress(String url,
+                                      ServerSettingsPage.AddressTestCallback callback) {
+                routeCoordinator.testLocalAddress(url, result -> {
+                    if (result.reachable) {
+                        callback.onResult(true, result.latencyMs > 0 ?
+                                result.latencyMs + " ms" : "连接正常");
+                    } else {
+                        callback.onResult(false, result.diagnostic());
+                    }
+                });
+            }
+
+            @Override
+            public void onClose() {
+                if (routeCoordinator.hasConfiguredRoute()) {
+                    showSettingsCenter();
+                } else {
+                    Toast.makeText(MainActivity.this, "请先保存至少一个服务器地址",
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+        }));
+    }
+
+    private void showSettingsCenter() {
+        showSettingsCenter(true);
+    }
+
+    private void showSettingsCenter(boolean refreshServerVersion) {
+        rememberCurrentWebUrl();
+        serverSettingsVisible = true;
+        stateBeforeSettings = stateMachine.getState();
+        transitionTo(AppStateMachine.State.SETTINGS);
+        String routeSummary = "自动管理 · " +
+                routeName(routeCoordinator.getActiveType());
+        SettingsCenterPage.Model model = new SettingsCenterPage.Model(
+                routeSummary,
+                quickActionsEnabled ? "快捷入口已显示" : "快捷入口已隐藏",
+                AppSecurity.isEnabled(this) ? AppSecurity.getModeLabel(this) : "未开启保护",
+                "v" + BuildConfig.VERSION_NAME,
+                cachedServerVersion == null ?
+                        (serverVersionDetectionAttempted ? "未检测到" : "检测中…") :
+                        "v" + cachedServerVersion);
+        showOverlay(SettingsCenterPage.create(this, model, new SettingsCenterPage.Listener() {
+            @Override
+            public void onClose() {
+                handleNativeOverlayBack();
+            }
+
+            @Override
+            public void onServerAddresses() {
+                showServerSettings();
+            }
+
+            @Override
+            public void onRouteStatus() {
+                showRouteStatusDialog();
+            }
+
+            @Override
+            public void onSpeedTest() {
+                routeCoordinator.manualSpeedTest();
+            }
+
+            @Override
+            public void onInteractionSettings() {
+                showInteractionSettings();
+            }
+
+            @Override
+            public void onSecuritySettings() {
+                requestSecuritySettings();
+            }
+
+            @Override
+            public void onCheckUpdate() {
+                checkForUpdates(true);
+            }
+
+            @Override
+            public void onWebViewInfo() {
+                showWebViewInfo();
+            }
+
+            @Override
+            public void onClearSiteData() {
+                confirmClearSiteData();
+            }
+        }));
+        if (refreshServerVersion) refreshServerVersion();
+    }
+
+    private void refreshServerVersion() {
+        if (serverVersionRequestPending || !webViewController.isPageReady()) return;
+        serverVersionRequestPending = true;
+        webViewController.requestServerVersion(version -> {
+            serverVersionRequestPending = false;
+            serverVersionDetectionAttempted = true;
+            cachedServerVersion = version;
+            if (overlayLayer.getChildCount() == 1 &&
+                    SettingsCenterPage.isRoot(overlayLayer.getChildAt(0))) {
+                showSettingsCenter(false);
+            }
+        });
+    }
+
+    private void showInteractionSettings() {
+        serverSettingsVisible = true;
+        transitionTo(AppStateMachine.State.SETTINGS);
+        showOverlay(InteractionSettingsPage.create(this, quickActionsEnabled,
+                new InteractionSettingsPage.Listener() {
+                    @Override
+                    public void onChanged(boolean showQuickActions) {
+                        quickActionsEnabled = showQuickActions;
+                        preferences.edit().putBoolean(KEY_SHOW_QUICK_ACTIONS,
+                                quickActionsEnabled).apply();
+                        updateQuickActionsVisibility();
+                    }
+
+                    @Override
+                    public void onClose() {
+                        showSettingsCenter();
+                    }
                 }));
     }
 
@@ -306,7 +642,7 @@ public class MainActivity extends FragmentActivity implements
         root.addView(box, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
-        setContentView(root);
+        showOverlay(root);
     }
 
     @Override
@@ -335,24 +671,37 @@ public class MainActivity extends FragmentActivity implements
                                  RouteCoordinator.Snapshot snapshot, boolean changed,
                                  String reason, RouteCoordinator.Trigger trigger) {
         serverSettingsVisible = false;
+        hideRecoveryBanner();
         String oldBase = webViewController.getBaseUrl();
         if (oldBase == null) oldBase = restoredBaseUrl;
         String current = webViewController.currentUrl();
         if (current == null) current = lastWebUrl;
         String targetUrl = remapUrl(oldBase, current, target.url);
+        if (changed) {
+            cachedServerVersion = null;
+            serverVersionDetectionAttempted = false;
+        }
         restoredBaseUrl = target.url;
 
         if (!webViewController.isCreated()) {
             transitionTo(AppStateMachine.State.LOADING_WEB);
-            setContentView(webViewController.create(target.url, targetUrl));
+            webLayer.removeAllViews();
+            Bundle restoreState = restoredBaseUrl != null && restoredBaseUrl.equals(target.url) ?
+                    pendingWebViewState : null;
+            pendingWebViewState = null;
+            webLayer.addView(webViewController.create(target.url, targetUrl, restoreState),
+                    new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT));
+            hideOverlay();
         } else if (changed) {
+            hideOverlay();
             webViewController.setBaseUrl(target.url);
             transitionTo(AppStateMachine.State.LOADING_WEB);
             webViewController.loadUrl(targetUrl);
         } else if (trigger == RouteCoordinator.Trigger.RETRY ||
-                trigger == RouteCoordinator.Trigger.PAGE_FAILURE ||
-                trigger == RouteCoordinator.Trigger.MANUAL_MODE_CHANGE) {
+                trigger == RouteCoordinator.Trigger.PAGE_FAILURE) {
             transitionTo(AppStateMachine.State.LOADING_WEB);
+            hideOverlay();
             webViewController.reload();
         }
 
@@ -395,6 +744,11 @@ public class MainActivity extends FragmentActivity implements
         if (trigger == RouteCoordinator.Trigger.BACKGROUND_STARTUP &&
                 webViewController.isCreated() &&
                 stateMachine.getState() != AppStateMachine.State.ERROR) {
+            return;
+        }
+        if (ProgressiveRecoveryPolicy.shouldDeferFullError(trigger,
+                webViewController.isCreated(), consecutivePageFailures)) {
+            scheduleProgressivePageRetry();
             return;
         }
         showErrorPage(reason, lastFailure, snapshot);
@@ -454,7 +808,14 @@ public class MainActivity extends FragmentActivity implements
     public void onPageReady(String url) {
         lastWebUrl = url;
         lastFailure = null;
+        consecutivePageFailures = 0;
+        getWindow().getDecorView().removeCallbacks(progressivePageRetry);
+        hideRecoveryBanner();
         routeCoordinator.markPageSuccess();
+        if (backgroundStartupProbePending) {
+            getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
+            runPendingBackgroundStartupProbe();
+        }
         if (stateMachine.getState() != AppStateMachine.State.LOCKED &&
                 stateMachine.getState() != AppStateMachine.State.SETTINGS) {
             transitionTo(AppStateMachine.State.READY);
@@ -463,11 +824,15 @@ public class MainActivity extends FragmentActivity implements
 
     @Override
     public void onPageFailure(WebViewController.Failure failure) {
+        backgroundStartupProbePending = false;
+        getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
         lastFailure = failure;
+        consecutivePageFailures++;
         rememberCurrentWebUrl();
         routeCoordinator.markPageFailure();
-        showErrorPage("网页加载失败，已保留线路失败计数", failure,
-                routeCoordinator.getLastSnapshot());
+        showRecoveryBanner(consecutivePageFailures == 1 ?
+                "连接出现波动，正在检查当前线路和备用线路…" :
+                "连接再次失败，正在准备完整恢复选项…");
     }
 
     @Override
@@ -478,7 +843,7 @@ public class MainActivity extends FragmentActivity implements
     private void showErrorPage(String reason, WebViewController.Failure failure,
                                RouteCoordinator.Snapshot snapshot) {
         rememberCurrentWebUrl();
-        webViewController.destroy();
+        getWindow().getDecorView().removeCallbacks(progressivePageRetry);
         serverSettingsVisible = false;
         transitionTo(AppStateMachine.State.ERROR);
         String title = failure == null ? "无法连接记账服务" : failure.title;
@@ -486,9 +851,9 @@ public class MainActivity extends FragmentActivity implements
                 failure.detail + (reason == null || reason.isEmpty() ? "" : "\n" + reason);
         String browserUrl = browserTarget();
         ErrorRecoveryPage.Model model = new ErrorRecoveryPage.Model(title,
-                "可以重新连接、手动测速或明确切换线路。自动模式不会因一次波动立即跳线。",
+                "可以重新连接、手动测速或修改服务器地址。线路会根据当前网络自动选择。",
                 detail, snapshot, browserUrl != null);
-        setContentView(ErrorRecoveryPage.create(this, model, this));
+        showOverlay(ErrorRecoveryPage.create(this, model, this));
     }
 
     @Override
@@ -499,21 +864,6 @@ public class MainActivity extends FragmentActivity implements
     @Override
     public void onSpeedTest() {
         routeCoordinator.manualSpeedTest();
-    }
-
-    @Override
-    public void onSwitchLocal() {
-        routeCoordinator.setMode(RouteMode.LOCAL);
-    }
-
-    @Override
-    public void onSwitchPublic() {
-        routeCoordinator.setMode(RouteMode.PUBLIC);
-    }
-
-    @Override
-    public void onUseAutomaticMode() {
-        routeCoordinator.setMode(RouteMode.AUTO);
     }
 
     @Override
@@ -542,28 +892,13 @@ public class MainActivity extends FragmentActivity implements
             }
 
             @Override
-            public void onRouteStatus() {
-                showRouteStatusDialog();
-            }
-
-            @Override
-            public void onManualRoute() {
-                showManualRouteDialog();
-            }
-
-            @Override
             public void onSpeedTest() {
                 routeCoordinator.manualSpeedTest();
             }
 
             @Override
-            public void onOpenBrowser() {
-                MainActivity.this.onOpenBrowser();
-            }
-
-            @Override
-            public void onEditAddresses() {
-                showServerSettings();
+            public void onSettings() {
+                showSettingsCenter();
             }
 
             @Override
@@ -571,25 +906,6 @@ public class MainActivity extends FragmentActivity implements
                 lockImmediately();
             }
 
-            @Override
-            public void onSecuritySettings() {
-                requestSecuritySettings();
-            }
-
-            @Override
-            public void onCheckUpdate() {
-                checkForUpdates(true);
-            }
-
-            @Override
-            public void onWebViewInfo() {
-                showWebViewInfo();
-            }
-
-            @Override
-            public void onClearSiteData() {
-                confirmClearSiteData();
-            }
         });
     }
 
@@ -605,33 +921,32 @@ public class MainActivity extends FragmentActivity implements
         }
         String security = AppSecurity.isEnabled(this) ?
                 AppSecurity.getModeLabel(this) : "未开启保护";
-        return new QuickActionsSheet.Model(routeCoordinator.getMode().label(),
+        return new QuickActionsSheet.Model("自动管理",
                 routeName(routeCoordinator.getActiveType()), latency, security);
     }
 
     private void showRouteStatusDialog() {
         RouteCoordinator.Snapshot snapshot = routeCoordinator.getLastSnapshot();
-        new AlertDialog.Builder(this)
+        UiComponents.show(new AlertDialog.Builder(this)
                 .setTitle("线路状态")
                 .setMessage(routeStatusText(snapshot))
                 .setNegativeButton("关闭", null)
-                .setNeutralButton("切换线路", (dialog, which) -> showManualRouteDialog())
                 .setPositiveButton("手动测速", (dialog, which) -> routeCoordinator.manualSpeedTest())
-                .show();
+                .create());
     }
 
     private void showSpeedTestDialog(RouteCoordinator.Snapshot snapshot) {
-        new AlertDialog.Builder(this)
+        UiComponents.show(new AlertDialog.Builder(this)
                 .setTitle("测速完成")
                 .setMessage(routeStatusText(snapshot))
                 .setNegativeButton("关闭", null)
-                .setPositiveButton("切换线路", (dialog, which) -> showManualRouteDialog())
-                .show();
+                .setPositiveButton("再次测速", (dialog, which) -> routeCoordinator.manualSpeedTest())
+                .create());
     }
 
     private String routeStatusText(RouteCoordinator.Snapshot snapshot) {
         StringBuilder text = new StringBuilder();
-        text.append("模式：").append(routeCoordinator.getMode().label()).append('\n');
+        text.append("选择方式：自动管理\n");
         text.append("当前：").append(routeName(routeCoordinator.getActiveType())).append('\n');
         if (snapshot == null) {
             text.append("\n尚未完成测速");
@@ -639,29 +954,12 @@ public class MainActivity extends FragmentActivity implements
         }
         text.append("\n本地：").append(probeLabel(snapshot.local()));
         text.append("\n公网：").append(probeLabel(snapshot.publicRoute()));
-        text.append("\n\n自动切换规则：连续失败2次；切换后冷却60秒；仅在候选线路明显更快时因性能切换。");
+        text.append("\n\n自动规则：当前 Wi-Fi 命中时优先局域网；本地不可用时回退公网；网络变化后自动重新选择。");
         return text.toString();
     }
 
     private String probeLabel(RouteManager.ProbeResult result) {
         return result == null ? "未检测" : result.label() + " · " + result.diagnostic();
-    }
-
-    private void showManualRouteDialog() {
-        RouteMode current = routeCoordinator.getMode();
-        String[] labels = {"自动选择", "固定本地线路", "固定公网线路"};
-        RouteMode[] modes = {RouteMode.AUTO, RouteMode.LOCAL, RouteMode.PUBLIC};
-        int checked = current == RouteMode.LOCAL ? 1 : current == RouteMode.PUBLIC ? 2 : 0;
-        new AlertDialog.Builder(this)
-                .setTitle("手动切换线路")
-                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
-                    dialog.dismiss();
-                    routeCoordinator.setMode(modes[which]);
-                    Toast.makeText(this, "线路模式已设为：" + modes[which].label(),
-                            Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton("取消", null)
-                .show();
     }
 
     private void lockImmediately() {
@@ -697,7 +995,11 @@ public class MainActivity extends FragmentActivity implements
     }
 
     private void restoreAfterExternalFlow() {
-        if (webViewController.isCreated()) {
+        if (stateBeforeSettings == AppStateMachine.State.SETTINGS &&
+                routeCoordinator.hasConfiguredRoute()) {
+            showSettingsCenter();
+        } else if (webViewController.isCreated()) {
+            hideOverlay();
             transitionTo(webViewController.isPageReady() ?
                     AppStateMachine.State.READY : AppStateMachine.State.LOADING_WEB);
         } else if (stateBeforeSettings == AppStateMachine.State.ERROR && lastFailure != null) {
@@ -711,7 +1013,7 @@ public class MainActivity extends FragmentActivity implements
     }
 
     private void confirmClearSiteData() {
-        new AlertDialog.Builder(this)
+        UiComponents.show(new AlertDialog.Builder(this)
                 .setTitle("清除登录与缓存")
                 .setMessage("这会退出当前账号并清除网页缓存，但不会删除线路和安全验证配置。")
                 .setNegativeButton("取消", null)
@@ -722,7 +1024,7 @@ public class MainActivity extends FragmentActivity implements
                     }
                     Toast.makeText(this, "已清除登录与缓存", Toast.LENGTH_SHORT).show();
                 })
-                .show();
+                .create());
     }
 
     private void showWebViewInfo() {
@@ -744,22 +1046,22 @@ public class MainActivity extends FragmentActivity implements
             preferences.edit().putLong(KEY_LAST_UPDATE_CHECK, System.currentTimeMillis()).apply();
             if (!result.success) {
                 if (userInitiated) {
-                    new AlertDialog.Builder(this)
+                    UiComponents.show(new AlertDialog.Builder(this)
                             .setTitle("检查更新失败")
                             .setMessage(result.error == null ? "网络请求失败" : result.error)
                             .setPositiveButton("知道了", null)
-                            .show();
+                            .create());
                 }
                 return;
             }
             if (!result.updateAvailable) {
                 if (userInitiated) {
-                    new AlertDialog.Builder(this)
+                    UiComponents.show(new AlertDialog.Builder(this)
                             .setTitle("已是最新版本")
                             .setMessage("当前版本：" + BuildConfig.VERSION_NAME +
                                     "\n最新版本：" + result.latestVersion)
                             .setPositiveButton("知道了", null)
-                            .show();
+                            .create());
                 }
                 return;
             }
@@ -777,7 +1079,7 @@ public class MainActivity extends FragmentActivity implements
                 builder.setPositiveButton("下载更新",
                         (dialog, which) -> openExternal(Uri.parse(downloadUrl)));
             }
-            builder.show();
+            UiComponents.show(builder.create());
         });
     }
 
@@ -789,11 +1091,19 @@ public class MainActivity extends FragmentActivity implements
     }
 
     private void onDefaultNetworkChanged() {
+        refreshLocalRouteForNetwork();
         if (lifecycleCoordinator == null || !lifecycleCoordinator.isInitialized() ||
                 lifecycleCoordinator.isAuthInProgress() || !routeCoordinator.hasConfiguredRoute()) {
             return;
         }
         routeCoordinator.requestCheck(RouteCoordinator.Trigger.NETWORK_CHANGE);
+    }
+
+    private void refreshLocalRouteForNetwork() {
+        localUrl = LocalRouteRules.select(localRouteRules,
+                WifiRouteContext.currentSsid(this), WifiRouteContext.isWifiConnected(this));
+        if (preferences != null) preferences.edit().putString(KEY_LOCAL_URL, localUrl).apply();
+        if (routeCoordinator != null) routeCoordinator.setAddresses(localUrl, publicUrl);
     }
 
     private void openIntentUri(String uriString) {
@@ -857,6 +1167,53 @@ public class MainActivity extends FragmentActivity implements
         if (stateMachine.getState() != next) stateMachine.transitionTo(next);
     }
 
+    protected final AppStateMachine.State currentAppState() {
+        return stateMachine == null ? AppStateMachine.State.INITIALIZING : stateMachine.getState();
+    }
+
+    protected final EzBookkeepingPageDetector.PageIdentity cachedPageIdentity() {
+        return webViewController == null ? EzBookkeepingPageDetector.PageIdentity.UNKNOWN :
+                webViewController.getCachedPageIdentity();
+    }
+
+    protected final void refreshPageIdentityAfterNavigation() {
+        if (webViewController != null) webViewController.refreshPageIdentityAfterNavigation();
+    }
+
+    protected final boolean handleNativeOverlayBack() {
+        AppStateMachine.State state = currentAppState();
+        if (state == AppStateMachine.State.SETTINGS) {
+            if (!routeCoordinator.hasConfiguredRoute()) return false;
+            serverSettingsVisible = false;
+            if (stateBeforeSettings == AppStateMachine.State.ERROR && lastFailure != null) {
+                showErrorPage("返回设置前的连接错误", lastFailure,
+                        routeCoordinator.getLastSnapshot());
+            } else if (webViewController.isCreated()) {
+                hideOverlay();
+                transitionTo(webViewController.isPageReady() ?
+                        AppStateMachine.State.READY : AppStateMachine.State.LOADING_WEB);
+            } else {
+                hideOverlay();
+                transitionTo(AppStateMachine.State.CHECKING_ROUTE);
+                routeCoordinator.requestCheck(RouteCoordinator.Trigger.RETRY);
+            }
+            return true;
+        }
+        if (state == AppStateMachine.State.ERROR) {
+            hideOverlay();
+            showRecoveryBanner("正在重新检测线路并恢复页面…");
+            if (webViewController.isCreated()) {
+                transitionTo(webViewController.isPageReady() ?
+                        AppStateMachine.State.READY : AppStateMachine.State.LOADING_WEB);
+            } else {
+                transitionTo(AppStateMachine.State.CHECKING_ROUTE);
+            }
+            routeCoordinator.requestCheck(RouteCoordinator.Trigger.RETRY);
+            return true;
+        }
+        return false;
+    }
+
     private void registerScreenOffReceiver() {
         if (screenReceiverRegistered) return;
         IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
@@ -887,6 +1244,7 @@ public class MainActivity extends FragmentActivity implements
     @Override
     protected void onResume() {
         super.onResume();
+        if (webViewController != null) webViewController.syncPageTheme();
         if (lifecycleCoordinator == null) return;
         handleLifecycleAction(lifecycleCoordinator.onResumed(System.currentTimeMillis(),
                 AppSecurity.isEnabled(this), AppSecurity.getRelockTimeoutMs(this)));
@@ -909,6 +1267,9 @@ public class MainActivity extends FragmentActivity implements
         outState.putString(STATE_KEY, stateMachine.save());
         outState.putString(WEB_URL_KEY, lastWebUrl);
         outState.putString(BASE_URL_KEY, routeCoordinator.getActiveUrl());
+        Bundle webState = new Bundle();
+        webViewController.saveState(webState);
+        if (!webState.isEmpty()) outState.putBundle(WEB_VIEW_STATE_KEY, webState);
     }
 
     @Override
@@ -936,6 +1297,8 @@ public class MainActivity extends FragmentActivity implements
 
     @Override
     protected void onDestroy() {
+        getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
+        getWindow().getDecorView().removeCallbacks(progressivePageRetry);
         unregisterScreenOffReceiver();
         if (downloadController != null) downloadController.unregister();
         if (networkMonitor != null) networkMonitor.stop();

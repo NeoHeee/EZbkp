@@ -4,7 +4,6 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 
 public class FastStartPolicyTest {
     @Test
@@ -17,11 +16,11 @@ public class FastStartPolicyTest {
     }
 
     @Test
-    public void autoModeUsesLastSuccessfulPublicRoute() {
+    public void autoModePrefersMatchedLocalOverLastPublicRoute() {
         FastStartPolicy.Candidate candidate = FastStartPolicy.select(RouteMode.AUTO,
                 "http://local", "https://remote", "https://remote");
         assertNotNull(candidate);
-        assertEquals(RouteManager.TYPE_PUBLIC, candidate.type);
+        assertEquals(RouteManager.TYPE_LOCAL, candidate.type);
     }
 
     @Test
@@ -49,14 +48,14 @@ public class FastStartPolicyTest {
     }
 
     @Test
-    public void autoModeWithTwoRoutesAndNoHistoryStillProbesFirst() {
-        assertNull(FastStartPolicy.select(RouteMode.AUTO,
-                "http://local", "https://remote", ""));
+    public void autoModeWithTwoRoutesStartsMatchedLocalImmediately() {
+        assertEquals(RouteManager.TYPE_LOCAL, FastStartPolicy.select(RouteMode.AUTO,
+                "http://local", "https://remote", "").type);
     }
 
     @Test
-    public void staleHistoryIsIgnored() {
-        assertNull(FastStartPolicy.select(RouteMode.AUTO,
-                "http://new-local", "https://new-remote", "http://old-local"));
+    public void staleHistoryDoesNotOverrideMatchedLocal() {
+        assertEquals(RouteManager.TYPE_LOCAL, FastStartPolicy.select(RouteMode.AUTO,
+                "http://new-local", "https://new-remote", "http://old-local").type);
     }
 }

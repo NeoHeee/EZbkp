@@ -38,6 +38,7 @@ public final class NetworkMonitor {
 
                 @Override
                 public void onLost(Network network) {
+                    WifiRouteContext.onNetworkLost(network);
                     schedule();
                 }
             };
@@ -69,6 +70,6 @@ public final class NetworkMonitor {
 
     private void schedule() {
         handler.removeCallbacks(notifyChange);
-        handler.postDelayed(notifyChange, 1400L);
+        handler.postDelayed(notifyChange, 650L);
     }
 }

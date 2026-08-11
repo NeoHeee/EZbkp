@@ -20,7 +20,7 @@ public class RouteSwitchPolicyTest {
     }
 
     @Test
-    public void firstUnavailableProbeDoesNotSwitch() {
+    public void firstUnavailableProbeDoesNotSwitchOnSameNetwork() {
         RouteSwitchPolicy policy = new RouteSwitchPolicy();
         RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL,
                 false, 1700);
@@ -33,7 +33,7 @@ public class RouteSwitchPolicyTest {
     }
 
     @Test
-    public void secondUnavailableProbeSwitchesToAlternate() {
+    public void repeatedUnavailableProbeStillUsesPublic() {
         RouteSwitchPolicy policy = new RouteSwitchPolicy();
         RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL,
                 false, 1700);
@@ -43,6 +43,18 @@ public class RouteSwitchPolicyTest {
         policy.evaluate(RouteManager.TYPE_LOCAL, selection, 10_000L, true);
         RouteSwitchPolicy.Decision decision = policy.evaluate(RouteManager.TYPE_LOCAL,
                 selection, 12_000L, true);
+        assertTrue(decision.shouldSwitch);
+        assertEquals(remote, decision.target);
+    }
+
+    @Test
+    public void networkMismatchImmediatelyUsesEligiblePublicRoute() {
+        RouteSwitchPolicy policy = new RouteSwitchPolicy();
+        RouteManager.ProbeResult local = route("", RouteManager.TYPE_LOCAL, false, 1);
+        RouteManager.ProbeResult remote = route("https://remote", RouteManager.TYPE_PUBLIC,
+                true, 100);
+        RouteSwitchPolicy.Decision decision = policy.evaluate(RouteManager.TYPE_LOCAL,
+                selection(remote, local, remote), 10_000L, false);
         assertTrue(decision.shouldSwitch);
         assertEquals(remote, decision.target);
     }
@@ -76,7 +88,7 @@ public class RouteSwitchPolicyTest {
     }
 
     @Test
-    public void clearlyFasterRouteSwitchesAfterCooldown() {
+    public void fasterPublicRouteDoesNotOverrideReachableLocalRoute() {
         RouteSwitchPolicy policy = new RouteSwitchPolicy();
         policy.recordSwitch(10_000L);
         RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL,
@@ -85,7 +97,34 @@ public class RouteSwitchPolicyTest {
                 true, 90);
         RouteSwitchPolicy.Decision decision = policy.evaluate(RouteManager.TYPE_LOCAL,
                 selection(remote, local, remote), 80_001L, true);
+        assertFalse(decision.shouldSwitch);
+    }
+
+    @Test
+    public void matchedLocalRouteImmediatelyReplacesPublicRoute() {
+        RouteSwitchPolicy policy = new RouteSwitchPolicy();
+        RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL,
+                true, 300);
+        RouteManager.ProbeResult remote = route("https://remote", RouteManager.TYPE_PUBLIC,
+                true, 50);
+        RouteSwitchPolicy.Decision decision = policy.evaluate(RouteManager.TYPE_PUBLIC,
+                selection(local, local, remote), 20_000L, true);
         assertTrue(decision.shouldSwitch);
-        assertEquals(remote, decision.target);
+        assertEquals(local, decision.target);
+    }
+
+    @Test
+    public void recentLocalFailureTemporarilyHoldsPublicRoute() {
+        RouteSwitchPolicy policy = new RouteSwitchPolicy();
+        policy.blockLocalRetry(10_000L);
+        RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL,
+                true, 300);
+        RouteManager.ProbeResult remote = route("https://remote", RouteManager.TYPE_PUBLIC,
+                true, 50);
+        RouteManager.Selection routes = selection(local, local, remote);
+        assertFalse(policy.evaluate(RouteManager.TYPE_PUBLIC, routes, 15_000L, true)
+                .shouldSwitch);
+        assertTrue(policy.evaluate(RouteManager.TYPE_PUBLIC, routes, 20_001L, true)
+                .shouldSwitch);
     }
 }

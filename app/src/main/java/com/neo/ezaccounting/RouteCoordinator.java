@@ -10,8 +10,6 @@ public final class RouteCoordinator {
     public static final String KEY_LOCAL_LATENCY = "local_latency_ms";
     public static final String KEY_PUBLIC_LATENCY = "public_latency_ms";
 
-    private static final long NETWORK_CHECK_DEBOUNCE_MS = 1400L;
-
     public enum Trigger {
         STARTUP,
         FAST_START,
@@ -19,8 +17,7 @@ public final class RouteCoordinator {
         NETWORK_CHANGE,
         PAGE_FAILURE,
         RETRY,
-        MANUAL_SPEED_TEST,
-        MANUAL_MODE_CHANGE
+        MANUAL_SPEED_TEST
     }
 
     public interface Host {
@@ -69,8 +66,6 @@ public final class RouteCoordinator {
     private final RouteSwitchPolicy switchPolicy;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-    private final Runnable networkCheck = () -> performCheck(Trigger.NETWORK_CHANGE);
-
     private String localUrl = "";
     private String publicUrl = "";
     private String activeUrl;
@@ -79,6 +74,7 @@ public final class RouteCoordinator {
     private Trigger pendingTrigger;
     private Snapshot lastSnapshot;
     private String lastWebVerifiedUrl;
+    private long routeGeneration;
 
     public RouteCoordinator(SharedPreferences preferences, Host host) {
         this(preferences, host, new RouteManager(), new RouteSwitchPolicy());
@@ -90,11 +86,17 @@ public final class RouteCoordinator {
         this.host = host;
         this.routeManager = routeManager;
         this.switchPolicy = switchPolicy;
+        preferences.edit().remove(KEY_ROUTE_MODE).apply();
     }
 
     public void setAddresses(String localUrl, String publicUrl) {
+        String previousLocalUrl = this.localUrl;
+        String previousPublicUrl = this.publicUrl;
         this.localUrl = safe(localUrl);
         this.publicUrl = safe(publicUrl);
+        if (!previousLocalUrl.equals(this.localUrl) ||
+                !previousPublicUrl.equals(this.publicUrl)) routeGeneration++;
+        if (!previousLocalUrl.equals(this.localUrl)) switchPolicy.onLocalCandidateChanged();
         if (lastWebVerifiedUrl != null &&
                 !lastWebVerifiedUrl.equals(this.localUrl) &&
                 !lastWebVerifiedUrl.equals(this.publicUrl)) {
@@ -132,13 +134,7 @@ public final class RouteCoordinator {
     }
 
     public RouteMode getMode() {
-        return RouteMode.fromStored(preferences.getString(KEY_ROUTE_MODE, RouteMode.AUTO.name()));
-    }
-
-    public void setMode(RouteMode mode) {
-        RouteMode safeMode = mode == null ? RouteMode.AUTO : mode;
-        preferences.edit().putString(KEY_ROUTE_MODE, safeMode.name()).apply();
-        requestCheck(Trigger.MANUAL_MODE_CHANGE);
+        return RouteMode.AUTO;
     }
 
     public String getActiveUrl() {
@@ -149,6 +145,10 @@ public final class RouteCoordinator {
         return activeType;
     }
 
+    public void testLocalAddress(String url, RouteManager.ProbeCallback callback) {
+        routeManager.probeOnlyAsync(url, RouteManager.TYPE_LOCAL, callback);
+    }
+
     public Snapshot getLastSnapshot() {
         return lastSnapshot;
     }
@@ -156,11 +156,8 @@ public final class RouteCoordinator {
     public void requestCheck(Trigger trigger) {
         Trigger safeTrigger = trigger == null ? Trigger.RETRY : trigger;
         if (safeTrigger == Trigger.NETWORK_CHANGE) {
-            mainHandler.removeCallbacks(networkCheck);
-            mainHandler.postDelayed(networkCheck, NETWORK_CHECK_DEBOUNCE_MS);
-            return;
+            routeGeneration++;
         }
-        mainHandler.removeCallbacks(networkCheck);
         performCheck(safeTrigger);
     }
 
@@ -198,9 +195,18 @@ public final class RouteCoordinator {
         }
 
         checkInProgress = true;
+        long generation = routeGeneration;
+        String checkedLocalUrl = localUrl;
+        String checkedPublicUrl = publicUrl;
         host.onRouteCheckStarted(trigger);
-        routeManager.probeAllAsync(localUrl, publicUrl, raw -> {
+        routeManager.probeAllAsync(checkedLocalUrl, checkedPublicUrl, raw -> {
             checkInProgress = false;
+            if (generation != routeGeneration ||
+                    !checkedLocalUrl.equals(localUrl) ||
+                    !checkedPublicUrl.equals(publicUrl)) {
+                drainPending();
+                return;
+            }
             RouteMode mode = getMode();
             String lastRoute = preferences.getString(KEY_LAST_ROUTE, "");
 
@@ -229,15 +235,12 @@ public final class RouteCoordinator {
                 return;
             }
 
-            if (mode != RouteMode.AUTO) {
-                handleForcedMode(snapshot, trigger);
-                drainPending();
-                return;
-            }
-
-            boolean allowPerformanceSwitch = trigger != Trigger.BACKGROUND_STARTUP;
+            boolean activeRouteEligible = activeType == RouteManager.TYPE_LOCAL ?
+                    activeUrl != null && activeUrl.equals(localUrl) :
+                    activeType == RouteManager.TYPE_PUBLIC ?
+                            activeUrl != null && activeUrl.equals(publicUrl) : true;
             RouteSwitchPolicy.Decision decision = switchPolicy.evaluate(activeType,
-                    selection, snapshot.checkedAt, allowPerformanceSwitch);
+                    selection, snapshot.checkedAt, activeRouteEligible);
             if (decision.shouldSwitch && decision.target != null) {
                 activate(decision.target, snapshot, decision.reason, trigger);
             } else if (activeUrl != null && snapshot.activeReachable()) {
@@ -281,31 +284,18 @@ public final class RouteCoordinator {
                 System.currentTimeMillis());
     }
 
-    private void handleForcedMode(Snapshot snapshot, Trigger trigger) {
-        RouteManager.ProbeResult target = snapshot.selection == null ? null :
-                snapshot.selection.selected;
-        if (target == null || !target.reachable) {
-            String reason = snapshot.mode == RouteMode.LOCAL ? "固定的本地线路不可用" :
-                    "固定的公网线路独立探测未通过";
-            if (trigger == Trigger.BACKGROUND_STARTUP && activeUrl != null) {
-                host.onRouteStable(snapshot, reason + "，等待页面实际加载结果", trigger);
-            } else {
-                host.onRouteUnavailable(snapshot, reason, trigger);
-            }
-            return;
-        }
-        String reason = target.verificationPending ?
-                "独立探测未通过，尝试由 WebView 实际验证" : "按手动线路模式切换";
-        activate(target, snapshot, reason, trigger);
-    }
-
     private void activate(RouteManager.ProbeResult target, Snapshot snapshot, String reason,
                           Trigger trigger) {
         boolean changed = activeUrl == null || !activeUrl.equals(target.url);
+        int previousType = activeType;
         activeUrl = target.url;
         activeType = target.type;
         preferences.edit().putString(KEY_LAST_ROUTE, activeUrl).apply();
         if (changed) switchPolicy.recordSwitch(snapshot.checkedAt);
+        if (changed && previousType == RouteManager.TYPE_LOCAL &&
+                activeType == RouteManager.TYPE_PUBLIC && trigger != Trigger.NETWORK_CHANGE) {
+            switchPolicy.blockLocalRetry(snapshot.checkedAt);
+        }
         if (!target.verificationPending) switchPolicy.recordSuccess(activeType);
         Snapshot activated = new Snapshot(snapshot.selection, snapshot.mode, activeUrl,
                 activeType, snapshot.checkedAt);
@@ -330,8 +320,7 @@ public final class RouteCoordinator {
 
     private Trigger chooseHigherPriority(Trigger current, Trigger next) {
         if (current == null) return next;
-        if (next == Trigger.MANUAL_MODE_CHANGE || next == Trigger.RETRY ||
-                next == Trigger.MANUAL_SPEED_TEST) return next;
+        if (next == Trigger.RETRY || next == Trigger.MANUAL_SPEED_TEST) return next;
         if ((current == Trigger.NETWORK_CHANGE || current == Trigger.BACKGROUND_STARTUP) &&
                 next == Trigger.PAGE_FAILURE) return next;
         return current;

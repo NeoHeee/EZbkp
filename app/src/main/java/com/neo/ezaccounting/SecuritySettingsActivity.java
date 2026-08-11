@@ -22,7 +22,11 @@ import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 public class SecuritySettingsActivity extends FragmentActivity {
+    private final ExecutorService securityExecutor = Executors.newSingleThreadExecutor();
     private TextView currentMode;
     private Button relockButton;
     private Button screenOffButton;
@@ -41,19 +45,32 @@ public class SecuritySettingsActivity extends FragmentActivity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(24), dp(28), dp(24), dp(28));
+        root.setPadding(dp(UiComponents.PAGE_HORIZONTAL_DP), dp(UiComponents.PAGE_TOP_DP),
+                dp(UiComponents.PAGE_HORIZONTAL_DP), dp(UiComponents.PAGE_BOTTOM_DP));
         scrollView.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
-        title.setText("进入 App 的安全验证");
-        title.setTextSize(24);
+        title.setText("安全与隐私");
+        title.setTextSize(28);
         title.setTextColor(UiTheme.primaryText(this));
         title.setTypeface(null, android.graphics.Typeface.BOLD);
-        root.addView(title, fullWrap(dp(8)));
+        header.addView(title, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView close = new TextView(this);
+        close.setText("×");
+        close.setTextSize(28);
+        close.setTextColor(UiTheme.secondaryText(this));
+        UiComponents.styleIconButton(close);
+        close.setContentDescription("返回设置中心");
+        close.setOnClickListener(view -> finish());
+        header.addView(close, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        root.addView(header, fullWrap(dp(8)));
 
         TextView description = new TextView(this);
-        description.setText("选择进入 EZ记账 时使用的验证方式，并设置从后台返回或熄屏后的自动锁定策略。");
+        description.setText("管理进入应用时的身份验证与自动锁定策略。");
         description.setTextSize(14.5f);
         description.setTextColor(UiTheme.secondaryText(this));
         description.setLineSpacing(0, 1.15f);
@@ -64,8 +81,11 @@ public class SecuritySettingsActivity extends FragmentActivity {
         currentMode.setTextColor(UiTheme.primaryText(this));
         currentMode.setTypeface(null, android.graphics.Typeface.BOLD);
         currentMode.setPadding(dp(16), dp(14), dp(16), dp(14));
-        currentMode.setBackground(roundedBox(UiTheme.surface(this), UiTheme.border(this), 14));
-        root.addView(currentMode, fullWrap(dp(18)));
+        currentMode.setBackground(surfaceCard(16));
+        root.addView(currentMode, fullWrap(dp(24)));
+
+        TextView policyTitle = sectionTitle("锁定策略");
+        root.addView(policyTitle, fullWrap(dp(10)));
 
         relockButton = optionButton("自动锁定时间", "设置 App 切到后台后多长时间重新验证");
         root.addView(relockButton, fullWrap(dp(12)));
@@ -122,9 +142,13 @@ public class SecuritySettingsActivity extends FragmentActivity {
         button.setTextSize(15);
         button.setTextColor(UiTheme.primaryText(this));
         button.setPadding(dp(16), dp(12), dp(16), dp(12));
-        button.setBackground(roundedBox(UiTheme.surface(this), UiTheme.border(this), 14));
-        button.setMinHeight(dp(72));
+        button.setBackground(surfaceCard(16));
+        button.setMinHeight(dp(64));
         return button;
+    }
+
+    private GradientDrawable surfaceCard(int radiusDp) {
+        return UiComponents.surface(this);
     }
 
     private void chooseRelockTimeout() {
@@ -140,7 +164,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
         int checked = 1;
         for (int i = 0; i < values.length; i++) if (values[i] == current) checked = i;
 
-        new AlertDialog.Builder(this)
+        UiComponents.show(new AlertDialog.Builder(this)
                 .setTitle("自动锁定时间")
                 .setSingleChoiceItems(labels, checked, (dialog, which) -> {
                     AppSecurity.setRelockTimeoutMs(this, values[which]);
@@ -148,7 +172,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
                     policyChanged("自动锁定时间已设为" + labels[which]);
                 })
                 .setNegativeButton("取消", null)
-                .show();
+                .create());
     }
 
     private void toggleScreenOffLock() {
@@ -160,11 +184,11 @@ public class SecuritySettingsActivity extends FragmentActivity {
     private void configureBiometric() {
         int authenticators = BiometricManager.Authenticators.BIOMETRIC_WEAK;
         if (BiometricManager.from(this).canAuthenticate(authenticators) != BiometricManager.BIOMETRIC_SUCCESS) {
-            new AlertDialog.Builder(this)
+            UiComponents.show(new AlertDialog.Builder(this)
                     .setTitle("无法启用生物识别")
                     .setMessage("请先在手机系统设置中录入指纹或面容，然后再回来启用。")
                     .setPositiveButton("知道了", null)
-                    .show();
+                    .create());
             return;
         }
 
@@ -213,11 +237,33 @@ public class SecuritySettingsActivity extends FragmentActivity {
             String two = second.getText().toString();
             if (one.length() != 4) { first.setError("请输入四位数字"); return; }
             if (!one.equals(two)) { second.setError("两次输入不一致"); return; }
-            AppSecurity.setPin(this, one);
-            dialog.dismiss();
-            securityChanged("已启用四位数字密码");
+            Button save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            save.setEnabled(false);
+            save.setText("保存中…");
+            first.setEnabled(false);
+            second.setEnabled(false);
+            securityExecutor.execute(() -> {
+                try {
+                    AppSecurity.setPin(getApplicationContext(), one);
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        dialog.dismiss();
+                        securityChanged("已启用四位数字密码");
+                    });
+                } catch (RuntimeException error) {
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        save.setEnabled(true);
+                        save.setText("保存");
+                        first.setEnabled(true);
+                        second.setEnabled(true);
+                        Toast.makeText(this, "保存密码失败，请重试", Toast.LENGTH_LONG).show();
+                    });
+                }
+            });
         }));
         dialog.show();
+        UiComponents.styleDialog(dialog);
     }
 
     private EditText createPinInput(String hint) {
@@ -271,11 +317,29 @@ public class SecuritySettingsActivity extends FragmentActivity {
                 patternView.postDelayed(patternView::clearPattern, 450);
                 return;
             }
-            AppSecurity.setPattern(this, pattern);
-            dialog.dismiss();
-            securityChanged("已启用九宫格图形锁");
+            patternView.setEnabled(false);
+            instruction.setText("正在安全保存图形…");
+            securityExecutor.execute(() -> {
+                try {
+                    AppSecurity.setPattern(getApplicationContext(), pattern);
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        dialog.dismiss();
+                        securityChanged("已启用九宫格图形锁");
+                    });
+                } catch (RuntimeException error) {
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        firstPattern[0] = null;
+                        patternView.setEnabled(true);
+                        patternView.clearPattern();
+                        instruction.setText("保存失败，请重新绘制");
+                    });
+                }
+            });
         });
         dialog.show();
+        UiComponents.styleDialog(dialog);
     }
 
     private void confirmDisable() {
@@ -283,7 +347,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
             Toast.makeText(this, "安全验证目前未启用", Toast.LENGTH_SHORT).show();
             return;
         }
-        new AlertDialog.Builder(this)
+        UiComponents.show(new AlertDialog.Builder(this)
                 .setTitle("关闭安全验证")
                 .setMessage("关闭后，打开 EZ记账 将不再要求指纹、密码或图形验证。自动锁定策略会保留，重新启用时继续使用。")
                 .setNegativeButton("取消", null)
@@ -291,7 +355,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
                     AppSecurity.disable(this);
                     securityChanged("已关闭安全验证");
                 })
-                .show();
+                .create());
     }
 
     private void securityChanged(String text) {
@@ -337,4 +401,10 @@ public class SecuritySettingsActivity extends FragmentActivity {
     }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+
+    @Override
+    protected void onDestroy() {
+        securityExecutor.shutdownNow();
+        super.onDestroy();
+    }
 }

@@ -29,16 +29,9 @@ import java.util.List;
 public final class QuickActionsSheet {
     public interface Listener {
         void onHome();
-        void onRouteStatus();
-        void onManualRoute();
         void onSpeedTest();
-        void onOpenBrowser();
-        void onEditAddresses();
+        void onSettings();
         void onLock();
-        void onSecuritySettings();
-        void onCheckUpdate();
-        void onWebViewInfo();
-        void onClearSiteData();
     }
 
     public static final class Model {
@@ -64,19 +57,12 @@ public final class QuickActionsSheet {
         final String title;
         final String description;
         final Runnable action;
-        final boolean dangerous;
 
         ActionItem(int icon, String title, String description, Runnable action) {
-            this(icon, title, description, action, false);
-        }
-
-        ActionItem(int icon, String title, String description, Runnable action,
-                   boolean dangerous) {
             this.icon = icon;
             this.title = title;
             this.description = description;
             this.action = action;
-            this.dangerous = dangerous;
         }
     }
 
@@ -91,8 +77,8 @@ public final class QuickActionsSheet {
         dialog.setCanceledOnTouchOutside(false);
 
         FrameLayout overlay = new FrameLayout(activity);
-        overlay.setPadding(dp(activity, 16), dp(activity, 24), dp(activity, 16),
-                dp(activity, 24));
+        overlay.setPadding(dp(activity, 8), dp(activity, 24), dp(activity, 8),
+                dp(activity, 8));
         overlay.setClickable(true);
         overlay.setFocusable(true);
         overlay.setContentDescription("快捷功能遮罩，点击空白区域关闭");
@@ -122,7 +108,7 @@ public final class QuickActionsSheet {
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(0, dp(activity, 4), 0, dp(activity, 4));
 
-        addSectionHeading(activity, content, "常用操作", "页面、线路与安全控制");
+        addSectionHeading(activity, content, "快捷操作", "常用页面、线路与安全控制");
         addTileGrid(activity, content, Arrays.asList(
                 new ActionItem(android.R.drawable.ic_menu_view,
                         "回到首页", "返回记账主页面", listener::onHome),
@@ -133,42 +119,20 @@ public final class QuickActionsSheet {
                                     refreshed ? "正在刷新当前页面" : "当前页面尚未加载",
                                     Toast.LENGTH_SHORT).show();
                         }),
-                new ActionItem(android.R.drawable.ic_menu_info_details,
-                        "线路状态", "查看延迟与可用性", listener::onRouteStatus),
-                new ActionItem(android.R.drawable.ic_menu_rotate,
-                        "切换线路", "自动、本地或公网", listener::onManualRoute),
                 new ActionItem(android.R.drawable.ic_menu_recent_history,
                         "重新测速", "检测两条线路速度", listener::onSpeedTest),
                 new ActionItem(android.R.drawable.ic_lock_lock,
                         "立即上锁", "隐藏账目并重新验证", listener::onLock),
-                new ActionItem(android.R.drawable.ic_secure,
-                        "安全设置", "指纹、PIN 与图形锁", listener::onSecuritySettings)
+                new ActionItem(android.R.drawable.ic_menu_preferences,
+                        "设置中心", "查看全部设置与维护工具", listener::onSettings)
         ), dialog);
-
-        addSectionHeading(activity, content, "更多工具", "服务器、更新与运行环境");
-        addTileGrid(activity, content, Arrays.asList(
-                new ActionItem(android.R.drawable.ic_menu_edit,
-                        "服务器地址", "修改本地和公网地址", listener::onEditAddresses),
-                new ActionItem(android.R.drawable.ic_menu_share,
-                        "浏览器打开", "交给系统浏览器访问", listener::onOpenBrowser),
-                new ActionItem(android.R.drawable.stat_sys_download_done,
-                        "检查更新", "获取最新正式版本", listener::onCheckUpdate),
-                new ActionItem(android.R.drawable.ic_menu_manage,
-                        "内核信息", "查看系统 WebView", listener::onWebViewInfo)
-        ), dialog);
-
-        addSectionHeading(activity, content, "数据与维护", "谨慎执行不可撤销操作");
-        content.addView(createDangerAction(activity,
-                new ActionItem(android.R.drawable.ic_menu_delete,
-                        "清除登录与缓存", "退出当前账号并清理网页缓存",
-                        listener::onClearSiteData, true), dialog));
 
         scroll.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         panel.addView(scroll, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        TextView hint = text(activity, "点击卡片外区域可关闭", 12,
+        TextView hint = text(activity, "更多选项已收纳至设置中心", 12,
                 UiTheme.tertiaryText(activity));
         hint.setGravity(Gravity.CENTER);
         hint.setPadding(0, dp(activity, 10), 0, 0);
@@ -176,10 +140,10 @@ public final class QuickActionsSheet {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         DisplayMetrics metrics = activity.getResources().getDisplayMetrics();
-        int width = Math.min(metrics.widthPixels - dp(activity, 32), dp(activity, 560));
-        int height = Math.min((int) (metrics.heightPixels * 0.84f), dp(activity, 760));
+        int width = Math.min(metrics.widthPixels - dp(activity, 16), dp(activity, 600));
+        int height = Math.min((int) (metrics.heightPixels * 0.76f), dp(activity, 660));
         FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
-                width, height, Gravity.CENTER);
+                width, height, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         overlay.addView(panel, panelParams);
 
         dialog.setContentView(overlay);
@@ -230,7 +194,7 @@ public final class QuickActionsSheet {
         LinearLayout firstRow = new LinearLayout(context);
         firstRow.setOrientation(LinearLayout.HORIZONTAL);
         firstRow.setPadding(0, dp(context, 9), 0, 0);
-        firstRow.addView(statusCell(context, "线路模式", model.mode),
+        firstRow.addView(statusCell(context, "选择方式", model.mode),
                 weightedCellParams(context, true));
         firstRow.addView(statusCell(context, "当前线路", model.route),
                 weightedCellParams(context, false));
@@ -244,6 +208,17 @@ public final class QuickActionsSheet {
         secondRow.addView(statusCell(context, "安全保护", model.security),
                 weightedCellParams(context, false));
         panel.addView(secondRow);
+
+        if (useSingleColumn(context)) {
+            firstRow.setOrientation(LinearLayout.VERTICAL);
+            secondRow.setOrientation(LinearLayout.VERTICAL);
+            for (int index = 0; index < firstRow.getChildCount(); index++) {
+                firstRow.getChildAt(index).setLayoutParams(fullStatusParams(context, index > 0));
+            }
+            for (int index = 0; index < secondRow.getChildCount(); index++) {
+                secondRow.getChildAt(index).setLayoutParams(fullStatusParams(context, index > 0));
+            }
+        }
 
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -276,6 +251,13 @@ public final class QuickActionsSheet {
         return params;
     }
 
+    private static LinearLayout.LayoutParams fullStatusParams(Context context, boolean afterFirst) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        if (afterFirst) params.topMargin = dp(context, 8);
+        return params;
+    }
+
     private static void addSectionHeading(Context context, LinearLayout parent,
                                           String title, String subtitle) {
         LinearLayout heading = new LinearLayout(context);
@@ -292,12 +274,13 @@ public final class QuickActionsSheet {
 
     private static void addTileGrid(Context context, LinearLayout parent,
                                     List<ActionItem> items, Dialog dialog) {
-        for (int index = 0; index < items.size(); index += 2) {
+        int columns = useSingleColumn(context) ? 1 : 2;
+        for (int index = 0; index < items.size(); index += columns) {
             LinearLayout row = new LinearLayout(context);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.TOP);
 
-            if (index + 1 >= items.size()) {
+            if (columns == 1 || index + 1 >= items.size()) {
                 row.addView(createTile(context, items.get(index), dialog), fullTileParams());
             } else {
                 row.addView(createTile(context, items.get(index), dialog),
@@ -334,7 +317,7 @@ public final class QuickActionsSheet {
         tile.setMinimumHeight(dp(context, 112));
         tile.setClickable(true);
         tile.setFocusable(true);
-        tile.setBackground(ripple(context, tileBackground(context, false)));
+        tile.setBackground(ripple(context, tileBackground(context)));
         tile.setContentDescription(item.title + "，" + item.description);
         tile.setOnClickListener(view -> {
             dialog.dismiss();
@@ -346,7 +329,7 @@ public final class QuickActionsSheet {
         icon.setColorFilter(UiTheme.accent(context));
         icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         icon.setPadding(dp(context, 8), dp(context, 8), dp(context, 8), dp(context, 8));
-        icon.setBackground(iconBackground(context, false));
+        icon.setBackground(iconBackground(context));
         icon.setContentDescription(null);
         tile.addView(icon, new LinearLayout.LayoutParams(dp(context, 38), dp(context, 38)));
 
@@ -358,48 +341,8 @@ public final class QuickActionsSheet {
         TextView description = text(context, item.description, 11,
                 UiTheme.secondaryText(context));
         description.setPadding(0, dp(context, 3), 0, 0);
-        description.setMaxLines(2);
         tile.addView(description);
         return tile;
-    }
-
-    private static View createDangerAction(Context context, ActionItem item, Dialog dialog) {
-        LinearLayout row = new LinearLayout(context);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(context, 12), dp(context, 10), dp(context, 10), dp(context, 10));
-        row.setMinimumHeight(dp(context, 66));
-        row.setClickable(true);
-        row.setFocusable(true);
-        row.setBackground(ripple(context, tileBackground(context, true)));
-        row.setContentDescription(item.title + "，" + item.description);
-        row.setOnClickListener(view -> {
-            dialog.dismiss();
-            item.action.run();
-        });
-
-        ImageView icon = new ImageView(context);
-        icon.setImageResource(item.icon);
-        icon.setColorFilter(danger(context));
-        icon.setPadding(dp(context, 8), dp(context, 8), dp(context, 8), dp(context, 8));
-        icon.setBackground(iconBackground(context, true));
-        row.addView(icon, new LinearLayout.LayoutParams(dp(context, 40), dp(context, 40)));
-
-        LinearLayout texts = new LinearLayout(context);
-        texts.setOrientation(LinearLayout.VERTICAL);
-        texts.setPadding(dp(context, 11), 0, dp(context, 6), 0);
-        TextView title = text(context, item.title, 14, danger(context));
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        TextView description = text(context, item.description, 11, dangerSecondary(context));
-        description.setPadding(0, dp(context, 3), 0, 0);
-        texts.addView(title);
-        texts.addView(description);
-        row.addView(texts, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView arrow = text(context, "›", 25, dangerSecondary(context));
-        arrow.setGravity(Gravity.CENTER);
-        row.addView(arrow, new LinearLayout.LayoutParams(dp(context, 24), dp(context, 40)));
-        return row;
     }
 
     private static void configureWindow(Activity activity, Dialog dialog) {
@@ -421,14 +364,19 @@ public final class QuickActionsSheet {
 
     private static void animateIn(View panel) {
         panel.setAlpha(0f);
-        panel.setScaleX(0.92f);
-        panel.setScaleY(0.92f);
+        panel.setTranslationY(dp(panel.getContext(), 48));
         panel.animate()
                 .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
+                .translationY(0f)
                 .setDuration(220L)
                 .start();
+    }
+
+    private static boolean useSingleColumn(Context context) {
+        DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+        float widthDp = metrics.widthPixels / metrics.density;
+        return MobileLayoutPolicy.useSingleColumn(widthDp,
+                context.getResources().getConfiguration().fontScale);
     }
 
     private static GradientDrawable panelBackground(Context context) {
@@ -456,30 +404,18 @@ public final class QuickActionsSheet {
         return background;
     }
 
-    private static GradientDrawable tileBackground(Context context, boolean dangerous) {
+    private static GradientDrawable tileBackground(Context context) {
         GradientDrawable background = new GradientDrawable();
-        if (dangerous) {
-            background.setColor(UiTheme.isDark(context) ? Color.rgb(56, 29, 33) :
-                    Color.rgb(255, 245, 246));
-            background.setStroke(dp(context, 1), UiTheme.isDark(context) ?
-                    Color.rgb(104, 49, 57) : Color.rgb(252, 199, 207));
-        } else {
-            background.setColor(UiTheme.isDark(context) ? Color.rgb(31, 41, 42) : Color.WHITE);
-            background.setStroke(dp(context, 1), UiTheme.border(context));
-        }
+        background.setColor(UiTheme.isDark(context) ? Color.rgb(31, 41, 42) : Color.WHITE);
+        background.setStroke(dp(context, 1), UiTheme.border(context));
         background.setCornerRadius(dp(context, 16));
         return background;
     }
 
-    private static GradientDrawable iconBackground(Context context, boolean dangerous) {
+    private static GradientDrawable iconBackground(Context context) {
         GradientDrawable background = new GradientDrawable();
-        if (dangerous) {
-            background.setColor(UiTheme.isDark(context) ? Color.rgb(72, 31, 35) :
-                    Color.rgb(254, 235, 238));
-        } else {
-            background.setColor(UiTheme.isDark(context) ? Color.rgb(23, 63, 59) :
-                    Color.rgb(225, 248, 244));
-        }
+        background.setColor(UiTheme.isDark(context) ? Color.rgb(23, 63, 59) :
+                Color.rgb(225, 248, 244));
         background.setCornerRadius(dp(context, 12));
         return background;
     }
@@ -505,14 +441,6 @@ public final class QuickActionsSheet {
         text.setTextColor(color);
         text.setIncludeFontPadding(false);
         return text;
-    }
-
-    private static int danger(Context context) {
-        return UiTheme.isDark(context) ? Color.rgb(248, 113, 113) : Color.rgb(220, 38, 38);
-    }
-
-    private static int dangerSecondary(Context context) {
-        return UiTheme.isDark(context) ? Color.rgb(252, 165, 165) : Color.rgb(185, 28, 28);
     }
 
     private static int dp(Context context, float value) {

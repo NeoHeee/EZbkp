@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Validate signing secrets
         shell: bash
@@ -44,19 +44,19 @@ jobs:
           echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install Android platform
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.9'
 
@@ -74,10 +74,16 @@ jobs:
       - name: Verify signature and prepare artifact
         shell: bash
         run: |
+          VERSION="$(sed -n "s/.*versionName ['\"]\([^'\"]*\)['\"].*/\1/p" app/build.gradle | head -n 1)"
+          test -n "$VERSION" || { echo 'Unable to read versionName'; exit 1; }
+          if [ "${GITHUB_REF_TYPE:-}" = 'tag' ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match app version v$VERSION"
+            exit 1
+          fi
           mkdir -p dist
           APK='app/build/outputs/apk/release/app-release.apk'
-          OUTPUT='dist/EZ记账-v1.5.2-signed.apk'
-          CERT_INFO='dist/EZ记账-v1.5.2-签名信息.txt'
+          OUTPUT="dist/EZ记账-v${VERSION}-signed.apk"
+          CERT_INFO="dist/EZ记账-v${VERSION}-签名信息.txt"
           APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
           test -x "$APKSIGNER" || { echo "apksigner not found: $APKSIGNER"; exit 1; }
           cp "$APK" "$OUTPUT"
@@ -93,9 +99,9 @@ jobs:
           sha256sum "$OUTPUT" > "$OUTPUT.sha256"
 
       - name: Upload signed APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: EZ记账-Signed-Release-v1.5.2
+          name: EZ记账-Signed-Release
           path: dist/*
           if-no-files-found: error
           retention-days: 90
