@@ -47,4 +47,10 @@ public final class EzBookkeepingPageDetector {
     public static boolean isHomeResult(String rawResult) {
         return parseIdentity(rawResult) == PageIdentity.HOME;
     }
+
+    public static boolean resolveHome(PageIdentity cachedIdentity, boolean urlAtHome) {
+        if (cachedIdentity == PageIdentity.HOME) return true;
+        if (cachedIdentity == PageIdentity.OTHER) return false;
+        return urlAtHome;
+    }
 }

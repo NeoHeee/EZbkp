@@ -10,11 +10,13 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -45,6 +47,7 @@ public class MainActivity extends FragmentActivity implements
     private static final String BASE_URL_KEY = "base_url";
     private static final long AUTO_UPDATE_INTERVAL_MS = 24L * 60L * 60L * 1000L;
     private static final long BACKGROUND_STARTUP_PROBE_FALLBACK_MS = 2500L;
+    private static final long PROGRESSIVE_PAGE_RETRY_DELAY_MS = 900L;
 
     private SharedPreferences preferences;
     private String localUrl;
@@ -56,8 +59,14 @@ public class MainActivity extends FragmentActivity implements
     private boolean screenReceiverRegistered;
     private boolean serverSettingsVisible;
     private boolean backgroundStartupProbePending;
+    private int consecutivePageFailures;
+    private FrameLayout appRoot;
+    private FrameLayout webLayer;
+    private FrameLayout overlayLayer;
+    private TextView recoveryBanner;
 
     private final Runnable backgroundStartupProbe = this::runPendingBackgroundStartupProbe;
+    private final Runnable progressivePageRetry = this::runProgressivePageRetry;
 
     private ValueCallback<Uri[]> filePathCallback;
     private Uri pendingCameraUri;
@@ -123,6 +132,7 @@ public class MainActivity extends FragmentActivity implements
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         UiTheme.applySystemBars(this);
+        createPersistentRoot();
 
         preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
         localUrl = preferences.getString(KEY_LOCAL_URL, "");
@@ -153,6 +163,89 @@ public class MainActivity extends FragmentActivity implements
             pendingShortcutAction = null;
         }
         handleLifecycleAction(lifecycleCoordinator.onCreate(AppSecurity.isEnabled(this)));
+    }
+
+    private void createPersistentRoot() {
+        appRoot = new FrameLayout(this);
+        appRoot.setBackgroundColor(UiTheme.background(this));
+
+        webLayer = new FrameLayout(this);
+        webLayer.setBackgroundColor(UiTheme.webBackground(this));
+        appRoot.addView(webLayer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        overlayLayer = new FrameLayout(this);
+        overlayLayer.setVisibility(View.GONE);
+        appRoot.addView(overlayLayer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        recoveryBanner = new TextView(this);
+        recoveryBanner.setTextSize(14);
+        recoveryBanner.setTextColor(Color.WHITE);
+        recoveryBanner.setGravity(Gravity.CENTER_VERTICAL);
+        recoveryBanner.setPadding(dp(16), dp(12), dp(16), dp(12));
+        GradientDrawable bannerBackground = new GradientDrawable();
+        bannerBackground.setColor(Color.rgb(180, 83, 9));
+        bannerBackground.setCornerRadius(dp(14));
+        recoveryBanner.setBackground(bannerBackground);
+        recoveryBanner.setElevation(dp(8));
+        recoveryBanner.setVisibility(View.GONE);
+        FrameLayout.LayoutParams bannerParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM);
+        bannerParams.setMargins(dp(16), dp(16), dp(16), dp(24));
+        appRoot.addView(recoveryBanner, bannerParams);
+
+        setContentView(appRoot);
+    }
+
+    private void showOverlay(View content) {
+        overlayLayer.removeAllViews();
+        overlayLayer.addView(content, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        overlayLayer.setAlpha(1f);
+        overlayLayer.setVisibility(View.VISIBLE);
+        overlayLayer.bringToFront();
+        recoveryBanner.bringToFront();
+        hideRecoveryBanner();
+    }
+
+    private void hideOverlay() {
+        overlayLayer.removeAllViews();
+        overlayLayer.setVisibility(View.GONE);
+    }
+
+    private void showRecoveryBanner(String text) {
+        if (recoveryBanner == null) return;
+        recoveryBanner.animate().cancel();
+        recoveryBanner.setText(text);
+        recoveryBanner.setAlpha(0f);
+        recoveryBanner.setTranslationY(dp(12));
+        recoveryBanner.setVisibility(View.VISIBLE);
+        recoveryBanner.bringToFront();
+        recoveryBanner.animate().alpha(1f).translationY(0f).setDuration(180L).start();
+        recoveryBanner.announceForAccessibility(text);
+    }
+
+    private void hideRecoveryBanner() {
+        if (recoveryBanner == null || recoveryBanner.getVisibility() != View.VISIBLE) return;
+        recoveryBanner.animate().cancel();
+        recoveryBanner.setVisibility(View.GONE);
+        recoveryBanner.setAlpha(1f);
+        recoveryBanner.setTranslationY(0f);
+    }
+
+    private void runProgressivePageRetry() {
+        if (consecutivePageFailures != 1 || serverSettingsVisible || isFinishing() ||
+                isDestroyed() || !webViewController.isCreated()) return;
+        showRecoveryBanner("连接仍不稳定，正在重试当前页面…");
+        webViewController.reload();
+    }
+
+    private void scheduleProgressivePageRetry() {
+        getWindow().getDecorView().removeCallbacks(progressivePageRetry);
+        getWindow().getDecorView().postDelayed(progressivePageRetry,
+                PROGRESSIVE_PAGE_RETRY_DELAY_MS);
     }
 
     @Override
@@ -280,11 +373,10 @@ public class MainActivity extends FragmentActivity implements
 
     private void showServerSettings() {
         rememberCurrentWebUrl();
-        webViewController.destroy();
         serverSettingsVisible = true;
         stateBeforeSettings = stateMachine.getState();
         transitionTo(AppStateMachine.State.SETTINGS);
-        setContentView(ServerSettingsPage.create(this, localUrl, publicUrl,
+        showOverlay(ServerSettingsPage.create(this, localUrl, publicUrl,
                 (savedLocal, savedPublic) -> {
                     localUrl = savedLocal;
                     publicUrl = savedPublic;
@@ -295,6 +387,8 @@ public class MainActivity extends FragmentActivity implements
                     routeCoordinator.setAddresses(localUrl, publicUrl);
                     serverSettingsVisible = false;
                     lastFailure = null;
+                    hideOverlay();
+                    transitionTo(AppStateMachine.State.CHECKING_ROUTE);
                     routeCoordinator.requestCheck(RouteCoordinator.Trigger.RETRY);
                 }));
     }
@@ -317,7 +411,7 @@ public class MainActivity extends FragmentActivity implements
         root.addView(box, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
-        setContentView(root);
+        showOverlay(root);
     }
 
     @Override
@@ -346,6 +440,7 @@ public class MainActivity extends FragmentActivity implements
                                  RouteCoordinator.Snapshot snapshot, boolean changed,
                                  String reason, RouteCoordinator.Trigger trigger) {
         serverSettingsVisible = false;
+        hideRecoveryBanner();
         String oldBase = webViewController.getBaseUrl();
         if (oldBase == null) oldBase = restoredBaseUrl;
         String current = webViewController.currentUrl();
@@ -355,8 +450,13 @@ public class MainActivity extends FragmentActivity implements
 
         if (!webViewController.isCreated()) {
             transitionTo(AppStateMachine.State.LOADING_WEB);
-            setContentView(webViewController.create(target.url, targetUrl));
+            webLayer.removeAllViews();
+            webLayer.addView(webViewController.create(target.url, targetUrl),
+                    new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT));
+            hideOverlay();
         } else if (changed) {
+            hideOverlay();
             webViewController.setBaseUrl(target.url);
             transitionTo(AppStateMachine.State.LOADING_WEB);
             webViewController.loadUrl(targetUrl);
@@ -364,6 +464,7 @@ public class MainActivity extends FragmentActivity implements
                 trigger == RouteCoordinator.Trigger.PAGE_FAILURE ||
                 trigger == RouteCoordinator.Trigger.MANUAL_MODE_CHANGE) {
             transitionTo(AppStateMachine.State.LOADING_WEB);
+            hideOverlay();
             webViewController.reload();
         }
 
@@ -406,6 +507,11 @@ public class MainActivity extends FragmentActivity implements
         if (trigger == RouteCoordinator.Trigger.BACKGROUND_STARTUP &&
                 webViewController.isCreated() &&
                 stateMachine.getState() != AppStateMachine.State.ERROR) {
+            return;
+        }
+        if (ProgressiveRecoveryPolicy.shouldDeferFullError(trigger,
+                webViewController.isCreated(), consecutivePageFailures)) {
+            scheduleProgressivePageRetry();
             return;
         }
         showErrorPage(reason, lastFailure, snapshot);
@@ -465,6 +571,9 @@ public class MainActivity extends FragmentActivity implements
     public void onPageReady(String url) {
         lastWebUrl = url;
         lastFailure = null;
+        consecutivePageFailures = 0;
+        getWindow().getDecorView().removeCallbacks(progressivePageRetry);
+        hideRecoveryBanner();
         routeCoordinator.markPageSuccess();
         if (backgroundStartupProbePending) {
             getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
@@ -481,10 +590,12 @@ public class MainActivity extends FragmentActivity implements
         backgroundStartupProbePending = false;
         getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
         lastFailure = failure;
+        consecutivePageFailures++;
         rememberCurrentWebUrl();
         routeCoordinator.markPageFailure();
-        showErrorPage("网页加载失败，已保留线路失败计数", failure,
-                routeCoordinator.getLastSnapshot());
+        showRecoveryBanner(consecutivePageFailures == 1 ?
+                "连接出现波动，正在检查当前线路和备用线路…" :
+                "连接再次失败，正在准备完整恢复选项…");
     }
 
     @Override
@@ -495,7 +606,7 @@ public class MainActivity extends FragmentActivity implements
     private void showErrorPage(String reason, WebViewController.Failure failure,
                                RouteCoordinator.Snapshot snapshot) {
         rememberCurrentWebUrl();
-        webViewController.destroy();
+        getWindow().getDecorView().removeCallbacks(progressivePageRetry);
         serverSettingsVisible = false;
         transitionTo(AppStateMachine.State.ERROR);
         String title = failure == null ? "无法连接记账服务" : failure.title;
@@ -505,7 +616,7 @@ public class MainActivity extends FragmentActivity implements
         ErrorRecoveryPage.Model model = new ErrorRecoveryPage.Model(title,
                 "可以重新连接、手动测速或明确切换线路。自动模式不会因一次波动立即跳线。",
                 detail, snapshot, browserUrl != null);
-        setContentView(ErrorRecoveryPage.create(this, model, this));
+        showOverlay(ErrorRecoveryPage.create(this, model, this));
     }
 
     @Override
@@ -715,6 +826,7 @@ public class MainActivity extends FragmentActivity implements
 
     private void restoreAfterExternalFlow() {
         if (webViewController.isCreated()) {
+            hideOverlay();
             transitionTo(webViewController.isPageReady() ?
                     AppStateMachine.State.READY : AppStateMachine.State.LOADING_WEB);
         } else if (stateBeforeSettings == AppStateMachine.State.ERROR && lastFailure != null) {
@@ -874,6 +986,53 @@ public class MainActivity extends FragmentActivity implements
         if (stateMachine.getState() != next) stateMachine.transitionTo(next);
     }
 
+    protected final AppStateMachine.State currentAppState() {
+        return stateMachine == null ? AppStateMachine.State.INITIALIZING : stateMachine.getState();
+    }
+
+    protected final EzBookkeepingPageDetector.PageIdentity cachedPageIdentity() {
+        return webViewController == null ? EzBookkeepingPageDetector.PageIdentity.UNKNOWN :
+                webViewController.getCachedPageIdentity();
+    }
+
+    protected final void refreshPageIdentityAfterNavigation() {
+        if (webViewController != null) webViewController.refreshPageIdentityAfterNavigation();
+    }
+
+    protected final boolean handleNativeOverlayBack() {
+        AppStateMachine.State state = currentAppState();
+        if (state == AppStateMachine.State.SETTINGS) {
+            if (!routeCoordinator.hasConfiguredRoute()) return false;
+            serverSettingsVisible = false;
+            if (stateBeforeSettings == AppStateMachine.State.ERROR && lastFailure != null) {
+                showErrorPage("返回设置前的连接错误", lastFailure,
+                        routeCoordinator.getLastSnapshot());
+            } else if (webViewController.isCreated()) {
+                hideOverlay();
+                transitionTo(webViewController.isPageReady() ?
+                        AppStateMachine.State.READY : AppStateMachine.State.LOADING_WEB);
+            } else {
+                hideOverlay();
+                transitionTo(AppStateMachine.State.CHECKING_ROUTE);
+                routeCoordinator.requestCheck(RouteCoordinator.Trigger.RETRY);
+            }
+            return true;
+        }
+        if (state == AppStateMachine.State.ERROR) {
+            hideOverlay();
+            showRecoveryBanner("正在重新检测线路并恢复页面…");
+            if (webViewController.isCreated()) {
+                transitionTo(webViewController.isPageReady() ?
+                        AppStateMachine.State.READY : AppStateMachine.State.LOADING_WEB);
+            } else {
+                transitionTo(AppStateMachine.State.CHECKING_ROUTE);
+            }
+            routeCoordinator.requestCheck(RouteCoordinator.Trigger.RETRY);
+            return true;
+        }
+        return false;
+    }
+
     private void registerScreenOffReceiver() {
         if (screenReceiverRegistered) return;
         IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
@@ -954,6 +1113,7 @@ public class MainActivity extends FragmentActivity implements
     @Override
     protected void onDestroy() {
         getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
+        getWindow().getDecorView().removeCallbacks(progressivePageRetry);
         unregisterScreenOffReceiver();
         if (downloadController != null) downloadController.unregister();
         if (networkMonitor != null) networkMonitor.stop();

@@ -70,6 +70,11 @@ public final class WebViewController {
     private ProgressBar pageProgress;
     private String baseUrl;
     private boolean pageReady;
+    private boolean mainFrameFailed;
+    private EzBookkeepingPageDetector.PageIdentity cachedPageIdentity =
+            EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
+    private String cachedIdentityUrl;
+    private final Runnable pageIdentityRefresh = this::refreshPageIdentity;
 
     private boolean twoFingerTapCandidate;
     private long twoFingerTapStartedAt;
@@ -144,15 +149,29 @@ public final class WebViewController {
         return webView == null ? null : webView.getUrl();
     }
 
+    public EzBookkeepingPageDetector.PageIdentity getCachedPageIdentity() {
+        return cachedPageIdentity;
+    }
+
+    public void refreshPageIdentityAfterNavigation() {
+        cachedPageIdentity = EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
+        cachedIdentityUrl = null;
+        schedulePageIdentityRefresh();
+    }
+
     public void loadUrl(String url) {
         if (webView == null || url == null || url.trim().isEmpty()) return;
         pageReady = false;
+        cachedPageIdentity = EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
+        cachedIdentityUrl = null;
         webView.loadUrl(url);
     }
 
     public void reload() {
         if (webView != null) {
             pageReady = false;
+            cachedPageIdentity = EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
+            cachedIdentityUrl = null;
             webView.reload();
         }
     }
@@ -226,14 +245,19 @@ public final class WebViewController {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 pageReady = false;
+                mainFrameFailed = false;
+                cachedPageIdentity = EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
+                cachedIdentityUrl = null;
                 showPageProgress();
                 host.onPageStarted(url);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
+                if (mainFrameFailed) return;
                 pageReady = true;
                 completePageProgress();
+                refreshPageIdentity();
                 host.onPageReady(url);
             }
 
@@ -241,6 +265,8 @@ public final class WebViewController {
             public void onReceivedError(WebView view, WebResourceRequest request,
                                         WebResourceError error) {
                 if (!request.isForMainFrame()) return;
+                if (mainFrameFailed) return;
+                mainFrameFailed = true;
                 int code = error == null ? 0 : error.getErrorCode();
                 String detail = error == null || error.getDescription() == null ?
                         "网页加载失败" : error.getDescription().toString();
@@ -253,6 +279,8 @@ public final class WebViewController {
                 if (!request.isForMainFrame() || errorResponse == null) return;
                 int status = errorResponse.getStatusCode();
                 if (status < 500) return;
+                if (mainFrameFailed) return;
+                mainFrameFailed = true;
                 host.onPageFailure(new Failure(FailureType.HTTP,
                         "服务器返回错误", "HTTP " + status + " " +
                         errorResponse.getReasonPhrase(), status, request.getUrl().toString()));
@@ -262,6 +290,8 @@ public final class WebViewController {
             public void onReceivedSslError(WebView view, SslErrorHandler handler,
                                            android.net.http.SslError error) {
                 handler.cancel();
+                if (mainFrameFailed) return;
+                mainFrameFailed = true;
                 host.onPageFailure(new Failure(FailureType.SSL,
                         "HTTPS证书验证失败",
                         error == null ? "证书无效，已阻止继续连接" : error.toString(),
@@ -360,6 +390,7 @@ public final class WebViewController {
                     twoFingerTapCandidate = false;
                     break;
                 case MotionEvent.ACTION_UP:
+                    schedulePageIdentityRefresh();
                 case MotionEvent.ACTION_CANCEL:
                     twoFingerTapCandidate = false;
                     break;
@@ -385,6 +416,30 @@ public final class WebViewController {
             firstTwoFingerTapX = x;
             firstTwoFingerTapY = y;
         }
+    }
+
+    private void schedulePageIdentityRefresh() {
+        if (webView == null) return;
+        String currentUrl = webView.getUrl();
+        if (cachedPageIdentity != EzBookkeepingPageDetector.PageIdentity.UNKNOWN &&
+                (cachedIdentityUrl == null ? currentUrl == null : cachedIdentityUrl.equals(currentUrl))) {
+            return;
+        }
+        webView.removeCallbacks(pageIdentityRefresh);
+        webView.postDelayed(pageIdentityRefresh, 220L);
+    }
+
+    private void refreshPageIdentity() {
+        WebView active = webView;
+        if (active == null) return;
+        String identityUrl = active.getUrl();
+        active.evaluateJavascript(EzBookkeepingPageDetector.homeDetectionScript(), result -> {
+            if (webView != active) return;
+            String currentUrl = active.getUrl();
+            if (identityUrl == null ? currentUrl != null : !identityUrl.equals(currentUrl)) return;
+            cachedPageIdentity = EzBookkeepingPageDetector.parseIdentity(result);
+            cachedIdentityUrl = identityUrl;
+        });
     }
 
     private boolean movedTooMuch(MotionEvent event) {
@@ -419,6 +474,7 @@ public final class WebViewController {
     public void destroy() {
         if (activeController.get() == this) activeController.clear();
         if (webView != null) {
+            webView.removeCallbacks(pageIdentityRefresh);
             webView.setOnTouchListener(null);
             webView.stopLoading();
             webView.destroy();
@@ -429,5 +485,8 @@ public final class WebViewController {
             pageProgress = null;
         }
         pageReady = false;
+        mainFrameFailed = false;
+        cachedPageIdentity = EzBookkeepingPageDetector.PageIdentity.UNKNOWN;
+        cachedIdentityUrl = null;
     }
 }

@@ -5,7 +5,6 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
-import android.widget.EditText;
 import android.widget.Toast;
 
 import androidx.activity.OnBackPressedCallback;
@@ -16,8 +15,6 @@ public final class UnifiedMainActivity extends MainActivity {
     private static final String KEY_PUBLIC_URL = "public_url";
 
     private long unifiedLastBackPressedAt;
-    private boolean pageIdentityCheckInProgress;
-    private int queuedBackPresses;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -37,18 +34,17 @@ public final class UnifiedMainActivity extends MainActivity {
     }
 
     private void handleUnifiedBack() {
-        if (pageIdentityCheckInProgress) {
-            queuedBackPresses = Math.min(1, queuedBackPresses + 1);
+        if (handleNativeOverlayBack()) {
+            resetExitConfirmation();
             return;
         }
 
         View root = getWindow().getDecorView();
         WebView webView = findWebView(root);
         boolean hasConfiguredRoute = hasConfiguredRoute();
+        AppStateMachine.State state = currentAppState();
 
         if (webView == null) {
-            AppStateMachine.State state = containsEditText(root) ?
-                    AppStateMachine.State.SETTINGS : AppStateMachine.State.ERROR;
             performBackDecision(state, null, hasConfiguredRoute,
                     false, true, null, System.currentTimeMillis());
             return;
@@ -56,40 +52,10 @@ public final class UnifiedMainActivity extends MainActivity {
 
         String homeUrl = resolveHomeUrl(webView.getUrl());
         boolean urlAtHome = BackNavigationPolicy.isAtHome(homeUrl, webView.getUrl());
-        pageIdentityCheckInProgress = true;
-
-        webView.evaluateJavascript(EzBookkeepingPageDetector.homeDetectionScript(), result -> {
-            pageIdentityCheckInProgress = false;
-            if (isFinishing() || isDestroyed() || webView.getParent() == null) {
-                queuedBackPresses = 0;
-                return;
-            }
-
-            EzBookkeepingPageDetector.PageIdentity identity =
-                    EzBookkeepingPageDetector.parseIdentity(result);
-            boolean atHome;
-            switch (identity) {
-                case HOME:
-                    atHome = true;
-                    break;
-                case OTHER:
-                    atHome = false;
-                    break;
-                case UNKNOWN:
-                default:
-                    atHome = urlAtHome;
-                    break;
-            }
-
-            performBackDecision(AppStateMachine.State.READY, webView,
-                    hasConfiguredRoute, webView.canGoBack(),
-                    atHome, homeUrl, System.currentTimeMillis());
-
-            if (queuedBackPresses > 0 && !isFinishing() && !isDestroyed()) {
-                queuedBackPresses--;
-                getWindow().getDecorView().post(this::handleUnifiedBack);
-            }
-        });
+        EzBookkeepingPageDetector.PageIdentity identity = cachedPageIdentity();
+        boolean atHome = EzBookkeepingPageDetector.resolveHome(identity, urlAtHome);
+        performBackDecision(state, webView, hasConfiguredRoute, webView.canGoBack(),
+                atHome, homeUrl, System.currentTimeMillis());
     }
 
     private void performBackDecision(AppStateMachine.State state,
@@ -106,6 +72,7 @@ public final class UnifiedMainActivity extends MainActivity {
         switch (action) {
             case WEB_BACK:
                 if (webView != null) webView.goBack();
+                refreshPageIdentityAfterNavigation();
                 resetExitConfirmation();
                 break;
             case GO_HOME:
@@ -115,10 +82,9 @@ public final class UnifiedMainActivity extends MainActivity {
             case RESTORE_SETTINGS:
             case RECOVER_ERROR:
                 resetExitConfirmation();
-                recreate();
+                handleNativeOverlayBack();
                 break;
             case EXIT:
-                queuedBackPresses = 0;
                 finishAndRemoveTask();
                 break;
             case SHOW_EXIT_HINT:
@@ -133,6 +99,7 @@ public final class UnifiedMainActivity extends MainActivity {
         if (webView == null || blank(homeUrl)) return;
         webView.clearHistory();
         webView.loadUrl(homeUrl);
+        refreshPageIdentityAfterNavigation();
         webView.postDelayed(() -> {
             if (webView.getParent() != null) webView.clearHistory();
         }, 1200L);
@@ -175,16 +142,6 @@ public final class UnifiedMainActivity extends MainActivity {
             if (found != null) return found;
         }
         return null;
-    }
-
-    private boolean containsEditText(View view) {
-        if (view instanceof EditText) return true;
-        if (!(view instanceof ViewGroup)) return false;
-        ViewGroup group = (ViewGroup) view;
-        for (int index = 0; index < group.getChildCount(); index++) {
-            if (containsEditText(group.getChildAt(index))) return true;
-        }
-        return false;
     }
 
     private void resetExitConfirmation() {
