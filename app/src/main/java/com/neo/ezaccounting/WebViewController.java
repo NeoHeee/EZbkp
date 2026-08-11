@@ -344,7 +344,8 @@ public final class WebViewController {
         settings.setMixedContentMode(secureOrigin ? WebSettings.MIXED_CONTENT_NEVER_ALLOW :
                 WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " EZAccounting/1.5.5");
+        settings.setUserAgentString(settings.getUserAgentString()
+                + " EZAccounting/" + BuildConfig.VERSION_NAME);
 
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);

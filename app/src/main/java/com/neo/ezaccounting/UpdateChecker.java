@@ -60,7 +60,7 @@ public final class UpdateChecker {
             connection.setReadTimeout(6000);
             connection.setRequestProperty("Accept", "application/vnd.github+json");
             connection.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
-            connection.setRequestProperty("User-Agent", "EZAccounting/1.4.0");
+            connection.setRequestProperty("User-Agent", "EZAccounting/" + BuildConfig.VERSION_NAME);
             int code = connection.getResponseCode();
             if (code < 200 || code >= 300) {
                 return failure("GitHub 返回 HTTP " + code);
