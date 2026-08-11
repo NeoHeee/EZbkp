@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
@@ -92,6 +93,10 @@ public final class WebViewController {
     }
 
     public View create(String baseUrl, String initialUrl) {
+        return create(baseUrl, initialUrl, null);
+    }
+
+    public View create(String baseUrl, String initialUrl, Bundle restoredState) {
         destroy();
         this.baseUrl = baseUrl;
         pageReady = false;
@@ -101,6 +106,8 @@ public final class WebViewController {
 
         webView = new WebView(activity);
         webView.setBackgroundColor(UiTheme.webBackground(activity));
+        webView.setContentDescription("记账页面");
+        webView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         root.addView(webView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         pageProgress = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
@@ -109,6 +116,8 @@ public final class WebViewController {
                 UiTheme.accent(activity)));
         pageProgress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(
                 Color.TRANSPARENT));
+        pageProgress.setContentDescription("页面加载进度");
+        pageProgress.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         pageProgress.setVisibility(View.GONE);
         FrameLayout.LayoutParams progressParams = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, dp(3));
@@ -118,8 +127,34 @@ public final class WebViewController {
 
         configure();
         setupHiddenGesture();
-        loadUrl(initialUrl == null || initialUrl.trim().isEmpty() ? baseUrl : initialUrl);
+        boolean restored = restoredState != null && webView.restoreState(restoredState) != null;
+        if (restored) {
+            pageReady = true;
+            syncPageTheme();
+            webView.post(() -> {
+                refreshPageIdentity();
+                host.onPageReady(currentUrl());
+            });
+        } else {
+            loadUrl(initialUrl == null || initialUrl.trim().isEmpty() ? baseUrl : initialUrl);
+        }
         return root;
+    }
+
+    public void saveState(Bundle outState) {
+        if (webView != null && outState != null) webView.saveState(outState);
+    }
+
+    public void syncPageTheme() {
+        if (webView == null) return;
+        String scheme = UiTheme.isDark(activity) ? "dark" : "light";
+        webView.evaluateJavascript("(function(){try{" +
+                "document.documentElement.style.colorScheme='" + scheme + "';" +
+                "document.documentElement.setAttribute('data-native-color-scheme','" + scheme + "');" +
+                "var m=document.querySelector('meta[name=\"color-scheme\"]');" +
+                "if(!m){m=document.createElement('meta');m.name='color-scheme';document.head.appendChild(m);}" +
+                "m.content='light dark';window.dispatchEvent(new Event('native-theme-change'));" +
+                "}catch(e){}})();", null);
     }
 
     public static boolean reloadActive() {
@@ -211,6 +246,8 @@ public final class WebViewController {
         settings.setAllowUniversalAccessFromFileURLs(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
+        int textZoom = Math.round(activity.getResources().getConfiguration().fontScale * 100f);
+        settings.setTextZoom(Math.max(100, Math.min(150, textZoom)));
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
@@ -257,6 +294,7 @@ public final class WebViewController {
                 if (mainFrameFailed) return;
                 pageReady = true;
                 completePageProgress();
+                syncPageTheme();
                 refreshPageIdentity();
                 host.onPageReady(url);
             }

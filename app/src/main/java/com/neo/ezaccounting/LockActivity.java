@@ -354,6 +354,7 @@ public class LockActivity extends FragmentActivity {
         button.setTextSize(16);
         button.setTextColor(Color.WHITE);
         button.setAllCaps(false);
+        button.setMinHeight(dp(52));
         GradientDrawable background = new GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
                 new int[]{Color.rgb(15, 118, 110), Color.rgb(13, 148, 136)});
@@ -368,6 +369,7 @@ public class LockActivity extends FragmentActivity {
         button.setTextSize(15);
         button.setTextColor(UiTheme.primaryText(this));
         button.setAllCaps(false);
+        button.setMinHeight(dp(52));
         button.setBackground(roundedBox(UiTheme.surface(this), UiTheme.border(this), 14));
         return button;
     }

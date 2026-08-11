@@ -45,6 +45,7 @@ public class MainActivity extends FragmentActivity implements
     private static final String STATE_KEY = "app_state";
     private static final String WEB_URL_KEY = "web_url";
     private static final String BASE_URL_KEY = "base_url";
+    private static final String WEB_VIEW_STATE_KEY = "web_view_state";
     private static final long AUTO_UPDATE_INTERVAL_MS = 24L * 60L * 60L * 1000L;
     private static final long BACKGROUND_STARTUP_PROBE_FALLBACK_MS = 2500L;
     private static final long PROGRESSIVE_PAGE_RETRY_DELAY_MS = 900L;
@@ -64,6 +65,8 @@ public class MainActivity extends FragmentActivity implements
     private FrameLayout webLayer;
     private FrameLayout overlayLayer;
     private TextView recoveryBanner;
+    private TextView quickActionsButton;
+    private Bundle pendingWebViewState;
 
     private final Runnable backgroundStartupProbe = this::runPendingBackgroundStartupProbe;
     private final Runnable progressivePageRetry = this::runProgressivePageRetry;
@@ -142,6 +145,8 @@ public class MainActivity extends FragmentActivity implements
                 savedInstanceState.getString(WEB_URL_KEY);
         restoredBaseUrl = savedInstanceState == null ? null :
                 savedInstanceState.getString(BASE_URL_KEY);
+        pendingWebViewState = savedInstanceState == null ? null :
+                savedInstanceState.getBundle(WEB_VIEW_STATE_KEY);
 
         AppStateMachine.State restored = AppStateMachine.restore(
                 savedInstanceState == null ? null : savedInstanceState.getString(STATE_KEY),
@@ -179,10 +184,33 @@ public class MainActivity extends FragmentActivity implements
         appRoot.addView(overlayLayer, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        quickActionsButton = new TextView(this);
+        quickActionsButton.setText("快捷");
+        quickActionsButton.setTextSize(14);
+        quickActionsButton.setTextColor(Color.WHITE);
+        quickActionsButton.setGravity(Gravity.CENTER);
+        quickActionsButton.setMinWidth(dp(64));
+        quickActionsButton.setMinHeight(dp(48));
+        quickActionsButton.setPadding(dp(14), dp(10), dp(14), dp(10));
+        quickActionsButton.setContentDescription("打开快捷中心");
+        quickActionsButton.setTooltipText("快捷中心");
+        quickActionsButton.setElevation(dp(8));
+        GradientDrawable quickBackground = new GradientDrawable();
+        quickBackground.setColor(UiTheme.accent(this));
+        quickBackground.setCornerRadius(dp(24));
+        quickActionsButton.setBackground(quickBackground);
+        quickActionsButton.setOnClickListener(view -> openQuickActions());
+        FrameLayout.LayoutParams quickParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.END | Gravity.BOTTOM);
+        quickParams.setMargins(dp(16), dp(16), dp(16), dp(24));
+        appRoot.addView(quickActionsButton, quickParams);
+
         recoveryBanner = new TextView(this);
         recoveryBanner.setTextSize(14);
         recoveryBanner.setTextColor(Color.WHITE);
         recoveryBanner.setGravity(Gravity.CENTER_VERTICAL);
+        recoveryBanner.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         recoveryBanner.setPadding(dp(16), dp(12), dp(16), dp(12));
         GradientDrawable bannerBackground = new GradientDrawable();
         bannerBackground.setColor(Color.rgb(180, 83, 9));
@@ -207,12 +235,15 @@ public class MainActivity extends FragmentActivity implements
         overlayLayer.setVisibility(View.VISIBLE);
         overlayLayer.bringToFront();
         recoveryBanner.bringToFront();
+        quickActionsButton.setVisibility(View.GONE);
         hideRecoveryBanner();
     }
 
     private void hideOverlay() {
         overlayLayer.removeAllViews();
         overlayLayer.setVisibility(View.GONE);
+        quickActionsButton.setVisibility(View.VISIBLE);
+        quickActionsButton.bringToFront();
     }
 
     private void showRecoveryBanner(String text) {
@@ -223,6 +254,7 @@ public class MainActivity extends FragmentActivity implements
         recoveryBanner.setTranslationY(dp(12));
         recoveryBanner.setVisibility(View.VISIBLE);
         recoveryBanner.bringToFront();
+        quickActionsButton.setVisibility(View.GONE);
         recoveryBanner.animate().alpha(1f).translationY(0f).setDuration(180L).start();
         recoveryBanner.announceForAccessibility(text);
     }
@@ -233,6 +265,10 @@ public class MainActivity extends FragmentActivity implements
         recoveryBanner.setVisibility(View.GONE);
         recoveryBanner.setAlpha(1f);
         recoveryBanner.setTranslationY(0f);
+        if (overlayLayer.getVisibility() != View.VISIBLE) {
+            quickActionsButton.setVisibility(View.VISIBLE);
+            quickActionsButton.bringToFront();
+        }
     }
 
     private void runProgressivePageRetry() {
@@ -451,7 +487,10 @@ public class MainActivity extends FragmentActivity implements
         if (!webViewController.isCreated()) {
             transitionTo(AppStateMachine.State.LOADING_WEB);
             webLayer.removeAllViews();
-            webLayer.addView(webViewController.create(target.url, targetUrl),
+            Bundle restoreState = restoredBaseUrl != null && restoredBaseUrl.equals(target.url) ?
+                    pendingWebViewState : null;
+            pendingWebViewState = null;
+            webLayer.addView(webViewController.create(target.url, targetUrl, restoreState),
                     new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT));
             hideOverlay();
@@ -1063,6 +1102,7 @@ public class MainActivity extends FragmentActivity implements
     @Override
     protected void onResume() {
         super.onResume();
+        if (webViewController != null) webViewController.syncPageTheme();
         if (lifecycleCoordinator == null) return;
         handleLifecycleAction(lifecycleCoordinator.onResumed(System.currentTimeMillis(),
                 AppSecurity.isEnabled(this), AppSecurity.getRelockTimeoutMs(this)));
@@ -1085,6 +1125,9 @@ public class MainActivity extends FragmentActivity implements
         outState.putString(STATE_KEY, stateMachine.save());
         outState.putString(WEB_URL_KEY, lastWebUrl);
         outState.putString(BASE_URL_KEY, routeCoordinator.getActiveUrl());
+        Bundle webState = new Bundle();
+        webViewController.saveState(webState);
+        if (!webState.isEmpty()) outState.putBundle(WEB_VIEW_STATE_KEY, webState);
     }
 
     @Override

@@ -91,8 +91,8 @@ public final class QuickActionsSheet {
         dialog.setCanceledOnTouchOutside(false);
 
         FrameLayout overlay = new FrameLayout(activity);
-        overlay.setPadding(dp(activity, 16), dp(activity, 24), dp(activity, 16),
-                dp(activity, 24));
+        overlay.setPadding(dp(activity, 8), dp(activity, 24), dp(activity, 8),
+                dp(activity, 8));
         overlay.setClickable(true);
         overlay.setFocusable(true);
         overlay.setContentDescription("快捷功能遮罩，点击空白区域关闭");
@@ -176,10 +176,10 @@ public final class QuickActionsSheet {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         DisplayMetrics metrics = activity.getResources().getDisplayMetrics();
-        int width = Math.min(metrics.widthPixels - dp(activity, 32), dp(activity, 560));
-        int height = Math.min((int) (metrics.heightPixels * 0.84f), dp(activity, 760));
+        int width = Math.min(metrics.widthPixels - dp(activity, 16), dp(activity, 600));
+        int height = Math.min((int) (metrics.heightPixels * 0.88f), dp(activity, 820));
         FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
-                width, height, Gravity.CENTER);
+                width, height, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         overlay.addView(panel, panelParams);
 
         dialog.setContentView(overlay);
@@ -245,6 +245,17 @@ public final class QuickActionsSheet {
                 weightedCellParams(context, false));
         panel.addView(secondRow);
 
+        if (useSingleColumn(context)) {
+            firstRow.setOrientation(LinearLayout.VERTICAL);
+            secondRow.setOrientation(LinearLayout.VERTICAL);
+            for (int index = 0; index < firstRow.getChildCount(); index++) {
+                firstRow.getChildAt(index).setLayoutParams(fullStatusParams(context, index > 0));
+            }
+            for (int index = 0; index < secondRow.getChildCount(); index++) {
+                secondRow.getChildAt(index).setLayoutParams(fullStatusParams(context, index > 0));
+            }
+        }
+
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         params.bottomMargin = dp(context, 8);
@@ -276,6 +287,13 @@ public final class QuickActionsSheet {
         return params;
     }
 
+    private static LinearLayout.LayoutParams fullStatusParams(Context context, boolean afterFirst) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        if (afterFirst) params.topMargin = dp(context, 8);
+        return params;
+    }
+
     private static void addSectionHeading(Context context, LinearLayout parent,
                                           String title, String subtitle) {
         LinearLayout heading = new LinearLayout(context);
@@ -292,12 +310,13 @@ public final class QuickActionsSheet {
 
     private static void addTileGrid(Context context, LinearLayout parent,
                                     List<ActionItem> items, Dialog dialog) {
-        for (int index = 0; index < items.size(); index += 2) {
+        int columns = useSingleColumn(context) ? 1 : 2;
+        for (int index = 0; index < items.size(); index += columns) {
             LinearLayout row = new LinearLayout(context);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.TOP);
 
-            if (index + 1 >= items.size()) {
+            if (columns == 1 || index + 1 >= items.size()) {
                 row.addView(createTile(context, items.get(index), dialog), fullTileParams());
             } else {
                 row.addView(createTile(context, items.get(index), dialog),
@@ -358,7 +377,6 @@ public final class QuickActionsSheet {
         TextView description = text(context, item.description, 11,
                 UiTheme.secondaryText(context));
         description.setPadding(0, dp(context, 3), 0, 0);
-        description.setMaxLines(2);
         tile.addView(description);
         return tile;
     }
@@ -421,14 +439,19 @@ public final class QuickActionsSheet {
 
     private static void animateIn(View panel) {
         panel.setAlpha(0f);
-        panel.setScaleX(0.92f);
-        panel.setScaleY(0.92f);
+        panel.setTranslationY(dp(panel.getContext(), 48));
         panel.animate()
                 .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
+                .translationY(0f)
                 .setDuration(220L)
                 .start();
+    }
+
+    private static boolean useSingleColumn(Context context) {
+        DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+        float widthDp = metrics.widthPixels / metrics.density;
+        return MobileLayoutPolicy.useSingleColumn(widthDp,
+                context.getResources().getConfiguration().fontScale);
     }
 
     private static GradientDrawable panelBackground(Context context) {

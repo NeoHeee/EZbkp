@@ -85,13 +85,14 @@ public final class ServerSettingsPage {
         save.setTextSize(16);
         save.setTextColor(Color.WHITE);
         save.setAllCaps(false);
+        save.setMinHeight(dp(activity, 52));
         GradientDrawable saveBackground = new GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
                 new int[]{Color.rgb(15, 118, 110), Color.rgb(13, 148, 136)});
         saveBackground.setCornerRadius(dp(activity, 14));
         save.setBackground(saveBackground);
         content.addView(save, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 52)));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView note = text(activity,
                 "进入记账界面后不会显示额外顶部栏。\n可在快捷中心刷新页面；双指快速双击可打开隐藏菜单。\n" +
