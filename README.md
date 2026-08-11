@@ -79,7 +79,7 @@ gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
 - 中文名称：拾账
 - 英文名称：Ledgerly
 - 包名：`com.neo.ezaccounting`
-- 当前版本：`1.6.2`（versionCode 23）
+- 当前版本：`1.6.3`（versionCode 24）
 - 最低 Android：8.0（API 26）
 - 目标 Android：API 35
 - 许可证：MIT
