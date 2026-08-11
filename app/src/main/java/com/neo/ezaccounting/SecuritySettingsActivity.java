@@ -349,7 +349,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
         }
         UiComponents.show(new AlertDialog.Builder(this)
                 .setTitle("关闭安全验证")
-                .setMessage("关闭后，打开 EZ记账 将不再要求指纹、密码或图形验证。自动锁定策略会保留，重新启用时继续使用。")
+                .setMessage("关闭后，打开拾账将不再要求指纹、密码或图形验证。自动锁定策略会保留，重新启用时继续使用。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("关闭", (dialog, which) -> {
                     AppSecurity.disable(this);

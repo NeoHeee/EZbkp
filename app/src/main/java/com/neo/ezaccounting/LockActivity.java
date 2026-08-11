@@ -80,13 +80,13 @@ public class LockActivity extends FragmentActivity {
         logo.setImageDrawable(getApplicationInfo().loadIcon(getPackageManager()));
         logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         logo.setAdjustViewBounds(true);
-        logo.setContentDescription("EZ记账应用图标");
+        logo.setContentDescription("拾账应用图标");
         LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(dp(78), dp(78));
         logoParams.bottomMargin = dp(22);
         root.addView(logo, logoParams);
 
         TextView title = new TextView(this);
-        title.setText("验证后进入 EZ记账");
+        title.setText("验证后进入拾账");
         title.setTextSize(23);
         title.setTextColor(UiTheme.primaryText(this));
         title.setTypeface(null, android.graphics.Typeface.BOLD);
@@ -291,7 +291,7 @@ public class LockActivity extends FragmentActivity {
         message.setText(normalPrompt);
 
         BiometricPrompt.PromptInfo.Builder builder = new BiometricPrompt.PromptInfo.Builder()
-                .setTitle("解锁 EZ记账")
+                .setTitle("解锁拾账")
                 .setSubtitle("使用指纹、面容或手机锁屏密码")
                 .setConfirmationRequired(false);
 
@@ -357,7 +357,7 @@ public class LockActivity extends FragmentActivity {
         button.setMinHeight(dp(52));
         GradientDrawable background = new GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{Color.rgb(15, 118, 110), Color.rgb(13, 148, 136)});
+                new int[]{UiTheme.accentDark(this), UiTheme.accent(this)});
         background.setCornerRadius(dp(14));
         button.setBackground(background);
         return button;

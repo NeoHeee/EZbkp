@@ -389,24 +389,22 @@ public final class QuickActionsSheet {
 
     private static GradientDrawable statusBackground(Context context) {
         GradientDrawable background = new GradientDrawable();
-        background.setColor(UiTheme.isDark(context) ? Color.rgb(20, 55, 52) :
-                Color.rgb(231, 250, 247));
+        background.setColor(UiTheme.softGold(context));
         background.setCornerRadius(dp(context, 18));
-        background.setStroke(dp(context, 1), UiTheme.isDark(context) ?
-                Color.rgb(34, 98, 91) : Color.rgb(169, 230, 220));
+        background.setStroke(dp(context, 1), UiTheme.gold(context));
         return background;
     }
 
     private static GradientDrawable statusCellBackground(Context context) {
         GradientDrawable background = new GradientDrawable();
-        background.setColor(UiTheme.isDark(context) ? Color.rgb(26, 67, 63) : Color.WHITE);
+        background.setColor(UiTheme.surface(context));
         background.setCornerRadius(dp(context, 13));
         return background;
     }
 
     private static GradientDrawable tileBackground(Context context) {
         GradientDrawable background = new GradientDrawable();
-        background.setColor(UiTheme.isDark(context) ? Color.rgb(31, 41, 42) : Color.WHITE);
+        background.setColor(UiTheme.surface(context));
         background.setStroke(dp(context, 1), UiTheme.border(context));
         background.setCornerRadius(dp(context, 16));
         return background;
@@ -414,8 +412,7 @@ public final class QuickActionsSheet {
 
     private static GradientDrawable iconBackground(Context context) {
         GradientDrawable background = new GradientDrawable();
-        background.setColor(UiTheme.isDark(context) ? Color.rgb(23, 63, 59) :
-                Color.rgb(225, 248, 244));
+        background.setColor(UiTheme.softAccent(context));
         background.setCornerRadius(dp(context, 12));
         return background;
     }
@@ -423,14 +420,13 @@ public final class QuickActionsSheet {
     private static GradientDrawable circleBackground(Context context) {
         GradientDrawable background = new GradientDrawable();
         background.setShape(GradientDrawable.OVAL);
-        background.setColor(UiTheme.isDark(context) ? Color.rgb(40, 51, 52) :
-                Color.rgb(241, 245, 245));
+        background.setColor(UiTheme.softGold(context));
         return background;
     }
 
     private static RippleDrawable ripple(Context context, GradientDrawable content) {
         return new RippleDrawable(ColorStateList.valueOf(
-                Color.argb(UiTheme.isDark(context) ? 60 : 38, 13, 148, 136)),
+                Color.argb(UiTheme.isDark(context) ? 64 : 42, 23, 107, 91)),
                 content, null);
     }
 

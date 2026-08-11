@@ -27,7 +27,7 @@ public final class RouteManager {
 
     private static final String PROBE_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120 Mobile Safari/537.36 EZAccounting/" + BuildConfig.VERSION_NAME;
+            "(KHTML, like Gecko) Chrome/120 Mobile Safari/537.36 Ledgerly/" + BuildConfig.VERSION_NAME;
 
     public enum ErrorKind {
         NONE,

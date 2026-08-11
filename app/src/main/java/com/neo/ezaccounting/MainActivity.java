@@ -250,7 +250,8 @@ public class MainActivity extends FragmentActivity implements
         recoveryBanner.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         recoveryBanner.setPadding(dp(16), dp(12), dp(16), dp(12));
         GradientDrawable bannerBackground = new GradientDrawable();
-        bannerBackground.setColor(Color.rgb(180, 83, 9));
+        bannerBackground.setColor(UiTheme.isDark(this) ?
+                Color.rgb(145, 96, 18) : Color.rgb(145, 91, 10));
         bannerBackground.setCornerRadius(dp(14));
         recoveryBanner.setBackground(bannerBackground);
         recoveryBanner.setElevation(dp(8));

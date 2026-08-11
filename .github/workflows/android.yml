@@ -44,14 +44,14 @@ jobs:
           VERSION="$(sed -n "s/.*versionName ['\"]\([^'\"]*\)['\"].*/\1/p" app/build.gradle | head -n 1)"
           test -n "$VERSION" || { echo 'Unable to read versionName'; exit 1; }
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk "dist/EZ记账-v${VERSION}-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/拾账-Ledgerly-v${VERSION}-debug.apk"
           cd dist
-          sha256sum "EZ记账-v${VERSION}-debug.apk" > "EZ记账-v${VERSION}-debug.apk.sha256"
+          sha256sum "拾账-Ledgerly-v${VERSION}-debug.apk" > "拾账-Ledgerly-v${VERSION}-debug.apk.sha256"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v6
         with:
-          name: EZ记账-Debug
+          name: 拾账-Ledgerly-Debug
           path: dist/*
           if-no-files-found: error
           retention-days: 30

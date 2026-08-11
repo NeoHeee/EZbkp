@@ -51,7 +51,7 @@ public final class FileChooserSupport {
             camera.putExtra(MediaStore.EXTRA_OUTPUT, cameraUri);
             camera.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION |
                     Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            camera.setClipData(ClipData.newRawUri("EZ记账拍照", cameraUri));
+            camera.setClipData(ClipData.newRawUri("拾账拍照", cameraUri));
             if (camera.resolveActivity(activity.getPackageManager()) != null) {
                 initial.add(camera);
             }
