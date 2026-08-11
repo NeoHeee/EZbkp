@@ -156,14 +156,7 @@ public final class ErrorRecoveryPage {
         Button button = new Button(activity);
         button.setText(label);
         button.setTextSize(16);
-        button.setTextColor(Color.WHITE);
-        button.setAllCaps(false);
-        button.setMinHeight(dp(activity, 52));
-        GradientDrawable background = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{Color.rgb(15, 118, 110), Color.rgb(13, 148, 136)});
-        background.setCornerRadius(dp(activity, 14));
-        button.setBackground(background);
+        UiComponents.stylePrimary(button);
         return button;
     }
 
@@ -171,11 +164,7 @@ public final class ErrorRecoveryPage {
         Button button = new Button(activity);
         button.setText(label);
         button.setTextSize(14.5f);
-        button.setTextColor(UiTheme.primaryText(activity));
-        button.setAllCaps(false);
-        button.setMinHeight(dp(activity, 52));
-        button.setBackground(box(activity, UiTheme.surface(activity),
-                UiTheme.border(activity), 14));
+        UiComponents.styleSecondary(button);
         return button;
     }
 

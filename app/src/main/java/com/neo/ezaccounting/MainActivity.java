@@ -433,22 +433,33 @@ public class MainActivity extends FragmentActivity implements
         stateBeforeSettings = stateMachine.getState();
         transitionTo(AppStateMachine.State.SETTINGS);
         showOverlay(ServerSettingsPage.create(this, localUrl, publicUrl,
-                quickActionsEnabled, (savedLocal, savedPublic, showQuickActions) -> {
-                    localUrl = savedLocal;
-                    publicUrl = savedPublic;
-                    quickActionsEnabled = showQuickActions;
-                    preferences.edit()
-                            .putString(KEY_LOCAL_URL, localUrl)
-                            .putString(KEY_PUBLIC_URL, publicUrl)
-                            .putBoolean(KEY_SHOW_QUICK_ACTIONS, quickActionsEnabled)
-                            .apply();
-                    routeCoordinator.setAddresses(localUrl, publicUrl);
-                    serverSettingsVisible = false;
-                    lastFailure = null;
-                    hideOverlay();
-                    transitionTo(AppStateMachine.State.CHECKING_ROUTE);
-                    routeCoordinator.requestCheck(RouteCoordinator.Trigger.RETRY);
-                }));
+                new ServerSettingsPage.Listener() {
+            @Override
+            public void onSaved(String savedLocal, String savedPublic) {
+                localUrl = savedLocal;
+                publicUrl = savedPublic;
+                preferences.edit()
+                        .putString(KEY_LOCAL_URL, localUrl)
+                        .putString(KEY_PUBLIC_URL, publicUrl)
+                        .apply();
+                routeCoordinator.setAddresses(localUrl, publicUrl);
+                serverSettingsVisible = false;
+                lastFailure = null;
+                hideOverlay();
+                transitionTo(AppStateMachine.State.CHECKING_ROUTE);
+                routeCoordinator.requestCheck(RouteCoordinator.Trigger.RETRY);
+            }
+
+            @Override
+            public void onClose() {
+                if (routeCoordinator.hasConfiguredRoute()) {
+                    showSettingsCenter();
+                } else {
+                    Toast.makeText(MainActivity.this, "请先保存至少一个服务器地址",
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+        }));
     }
 
     private void showSettingsCenter() {
@@ -490,7 +501,7 @@ public class MainActivity extends FragmentActivity implements
 
             @Override
             public void onInteractionSettings() {
-                showServerSettings();
+                showInteractionSettings();
             }
 
             @Override
@@ -513,6 +524,26 @@ public class MainActivity extends FragmentActivity implements
                 confirmClearSiteData();
             }
         }));
+    }
+
+    private void showInteractionSettings() {
+        serverSettingsVisible = true;
+        transitionTo(AppStateMachine.State.SETTINGS);
+        showOverlay(InteractionSettingsPage.create(this, quickActionsEnabled,
+                new InteractionSettingsPage.Listener() {
+                    @Override
+                    public void onChanged(boolean showQuickActions) {
+                        quickActionsEnabled = showQuickActions;
+                        preferences.edit().putBoolean(KEY_SHOW_QUICK_ACTIONS,
+                                quickActionsEnabled).apply();
+                        updateQuickActionsVisibility();
+                    }
+
+                    @Override
+                    public void onClose() {
+                        showSettingsCenter();
+                    }
+                }));
     }
 
     private void showLoadingScreen(String text) {
@@ -795,11 +826,6 @@ public class MainActivity extends FragmentActivity implements
             }
 
             @Override
-            public void onRouteStatus() {
-                showRouteStatusDialog();
-            }
-
-            @Override
             public void onManualRoute() {
                 showManualRouteDialog();
             }
@@ -807,11 +833,6 @@ public class MainActivity extends FragmentActivity implements
             @Override
             public void onSpeedTest() {
                 routeCoordinator.manualSpeedTest();
-            }
-
-            @Override
-            public void onOpenBrowser() {
-                MainActivity.this.onOpenBrowser();
             }
 
             @Override
@@ -824,25 +845,6 @@ public class MainActivity extends FragmentActivity implements
                 lockImmediately();
             }
 
-            @Override
-            public void onSecuritySettings() {
-                requestSecuritySettings();
-            }
-
-            @Override
-            public void onCheckUpdate() {
-                checkForUpdates(true);
-            }
-
-            @Override
-            public void onWebViewInfo() {
-                showWebViewInfo();
-            }
-
-            @Override
-            public void onClearSiteData() {
-                confirmClearSiteData();
-            }
         });
     }
 
@@ -864,22 +866,22 @@ public class MainActivity extends FragmentActivity implements
 
     private void showRouteStatusDialog() {
         RouteCoordinator.Snapshot snapshot = routeCoordinator.getLastSnapshot();
-        new AlertDialog.Builder(this)
+        UiComponents.show(new AlertDialog.Builder(this)
                 .setTitle("线路状态")
                 .setMessage(routeStatusText(snapshot))
                 .setNegativeButton("关闭", null)
                 .setNeutralButton("切换线路", (dialog, which) -> showManualRouteDialog())
                 .setPositiveButton("手动测速", (dialog, which) -> routeCoordinator.manualSpeedTest())
-                .show();
+                .create());
     }
 
     private void showSpeedTestDialog(RouteCoordinator.Snapshot snapshot) {
-        new AlertDialog.Builder(this)
+        UiComponents.show(new AlertDialog.Builder(this)
                 .setTitle("测速完成")
                 .setMessage(routeStatusText(snapshot))
                 .setNegativeButton("关闭", null)
                 .setPositiveButton("切换线路", (dialog, which) -> showManualRouteDialog())
-                .show();
+                .create());
     }
 
     private String routeStatusText(RouteCoordinator.Snapshot snapshot) {
@@ -905,7 +907,7 @@ public class MainActivity extends FragmentActivity implements
         String[] labels = {"自动选择", "固定本地线路", "固定公网线路"};
         RouteMode[] modes = {RouteMode.AUTO, RouteMode.LOCAL, RouteMode.PUBLIC};
         int checked = current == RouteMode.LOCAL ? 1 : current == RouteMode.PUBLIC ? 2 : 0;
-        new AlertDialog.Builder(this)
+        UiComponents.show(new AlertDialog.Builder(this)
                 .setTitle("手动切换线路")
                 .setSingleChoiceItems(labels, checked, (dialog, which) -> {
                     dialog.dismiss();
@@ -914,7 +916,7 @@ public class MainActivity extends FragmentActivity implements
                             Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("取消", null)
-                .show();
+                .create());
     }
 
     private void lockImmediately() {
@@ -950,7 +952,10 @@ public class MainActivity extends FragmentActivity implements
     }
 
     private void restoreAfterExternalFlow() {
-        if (webViewController.isCreated()) {
+        if (stateBeforeSettings == AppStateMachine.State.SETTINGS &&
+                routeCoordinator.hasConfiguredRoute()) {
+            showSettingsCenter();
+        } else if (webViewController.isCreated()) {
             hideOverlay();
             transitionTo(webViewController.isPageReady() ?
                     AppStateMachine.State.READY : AppStateMachine.State.LOADING_WEB);
@@ -965,7 +970,7 @@ public class MainActivity extends FragmentActivity implements
     }
 
     private void confirmClearSiteData() {
-        new AlertDialog.Builder(this)
+        UiComponents.show(new AlertDialog.Builder(this)
                 .setTitle("清除登录与缓存")
                 .setMessage("这会退出当前账号并清除网页缓存，但不会删除线路和安全验证配置。")
                 .setNegativeButton("取消", null)
@@ -976,7 +981,7 @@ public class MainActivity extends FragmentActivity implements
                     }
                     Toast.makeText(this, "已清除登录与缓存", Toast.LENGTH_SHORT).show();
                 })
-                .show();
+                .create());
     }
 
     private void showWebViewInfo() {
@@ -998,22 +1003,22 @@ public class MainActivity extends FragmentActivity implements
             preferences.edit().putLong(KEY_LAST_UPDATE_CHECK, System.currentTimeMillis()).apply();
             if (!result.success) {
                 if (userInitiated) {
-                    new AlertDialog.Builder(this)
+                    UiComponents.show(new AlertDialog.Builder(this)
                             .setTitle("检查更新失败")
                             .setMessage(result.error == null ? "网络请求失败" : result.error)
                             .setPositiveButton("知道了", null)
-                            .show();
+                            .create());
                 }
                 return;
             }
             if (!result.updateAvailable) {
                 if (userInitiated) {
-                    new AlertDialog.Builder(this)
+                    UiComponents.show(new AlertDialog.Builder(this)
                             .setTitle("已是最新版本")
                             .setMessage("当前版本：" + BuildConfig.VERSION_NAME +
                                     "\n最新版本：" + result.latestVersion)
                             .setPositiveButton("知道了", null)
-                            .show();
+                            .create());
                 }
                 return;
             }
@@ -1031,7 +1036,7 @@ public class MainActivity extends FragmentActivity implements
                 builder.setPositiveButton("下载更新",
                         (dialog, which) -> openExternal(Uri.parse(downloadUrl)));
             }
-            builder.show();
+            UiComponents.show(builder.create());
         });
     }
 

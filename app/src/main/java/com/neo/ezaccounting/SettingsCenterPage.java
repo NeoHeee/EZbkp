@@ -51,8 +51,10 @@ public final class SettingsCenterPage {
 
         LinearLayout content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(activity, 20), dp(activity, 24),
-                dp(activity, 20), dp(activity, 36));
+        content.setPadding(dp(activity, UiComponents.PAGE_HORIZONTAL_DP),
+                dp(activity, UiComponents.PAGE_TOP_DP),
+                dp(activity, UiComponents.PAGE_HORIZONTAL_DP),
+                dp(activity, UiComponents.PAGE_BOTTOM_DP));
         scroll.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -114,11 +116,8 @@ public final class SettingsCenterPage {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         TextView close = text(context, "×", 28, UiTheme.secondaryText(context), false);
-        close.setGravity(Gravity.CENTER);
-        close.setMinWidth(dp(context, 48));
-        close.setMinHeight(dp(context, 48));
+        UiComponents.styleIconButton(close);
         close.setContentDescription("关闭设置中心");
-        close.setBackground(ripple(context, circle(context)));
         close.setOnClickListener(view -> listener.onClose());
         row.addView(close, new LinearLayout.LayoutParams(dp(context, 48), dp(context, 48)));
         return row;
@@ -133,10 +132,7 @@ public final class SettingsCenterPage {
     private static LinearLayout card(Context context) {
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(UiTheme.surface(context));
-        background.setCornerRadius(dp(context, 16));
-        card.setBackground(background);
+        card.setBackground(UiComponents.surface(context));
         card.setClipToOutline(true);
         return card;
     }
@@ -199,14 +195,6 @@ public final class SettingsCenterPage {
     private static RippleDrawable ripple(Context context, GradientDrawable content) {
         return new RippleDrawable(ColorStateList.valueOf(Color.argb(
                 UiTheme.isDark(context) ? 54 : 34, 13, 148, 136)), content, null);
-    }
-
-    private static GradientDrawable circle(Context context) {
-        GradientDrawable background = new GradientDrawable();
-        background.setShape(GradientDrawable.OVAL);
-        background.setColor(UiTheme.isDark(context) ? Color.rgb(40, 51, 52) :
-                Color.rgb(235, 241, 240));
-        return background;
     }
 
     private static TextView text(Context context, String value, float size,

@@ -14,15 +14,14 @@ import android.view.WindowInsets;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Switch;
 import android.widget.TextView;
 
 public final class ServerSettingsPage {
     public interface Listener {
-        void onSaved(String localUrl, String publicUrl, boolean showQuickActions);
+        void onSaved(String localUrl, String publicUrl);
+        void onClose();
     }
 
     private static final class ImeState {
@@ -32,7 +31,7 @@ public final class ServerSettingsPage {
     private ServerSettingsPage() {}
 
     public static View create(Activity activity, String localUrl, String publicUrl,
-                              boolean showQuickActions, Listener listener) {
+                              Listener listener) {
         ScrollView scrollView = new ScrollView(activity);
         scrollView.setFillViewport(true);
         scrollView.setClipToPadding(false);
@@ -42,70 +41,54 @@ public final class ServerSettingsPage {
         LinearLayout content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER_HORIZONTAL);
-        content.setPadding(dp(activity, 28), dp(activity, 42), dp(activity, 28), dp(activity, 28));
+        content.setPadding(dp(activity, UiComponents.PAGE_HORIZONTAL_DP),
+                dp(activity, UiComponents.PAGE_TOP_DP),
+                dp(activity, UiComponents.PAGE_HORIZONTAL_DP),
+                dp(activity, UiComponents.PAGE_BOTTOM_DP));
         scrollView.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        ImageView logo = new ImageView(activity);
-        logo.setImageDrawable(activity.getApplicationInfo().loadIcon(activity.getPackageManager()));
-        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        logo.setAdjustViewBounds(true);
-        logo.setContentDescription("EZ记账应用图标");
-        LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(
-                dp(activity, 84), dp(activity, 84));
-        logoParams.bottomMargin = dp(activity, 24);
-        content.addView(logo, logoParams);
-
-        TextView title = text(activity, "配置 ezBookkeeping 地址", 24,
+        LinearLayout header = new LinearLayout(activity);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = text(activity, "连接与线路", 28,
                 UiTheme.primaryText(activity), true);
-        title.setGravity(Gravity.CENTER);
-        content.addView(title, fullWrap(activity, 10));
+        header.addView(title, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView close = text(activity, "×", 28, UiTheme.secondaryText(activity), false);
+        UiComponents.styleIconButton(close);
+        close.setContentDescription("返回设置中心");
+        close.setOnClickListener(view -> listener.onClose());
+        header.addView(close, new LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)));
+        content.addView(header, fullWrap(activity, 10));
 
         TextView description = text(activity,
-                "可同时填写本地地址和公网地址。自动模式会并行测速，并在满足防抖条件后切换线路。\n\n" +
-                        "建议：\n本地地址填写 NAS 局域网地址\n公网地址填写反向代理 HTTPS 地址",
+                "配置本地和公网服务器地址。自动模式会检测可用性并选择合适线路。",
                 14.5f, UiTheme.secondaryText(activity), false);
-        description.setGravity(Gravity.CENTER);
         description.setLineSpacing(0, 1.18f);
         content.addView(description, fullWrap(activity, 24));
 
-        content.addView(text(activity, "本地地址", 14.5f,
-                UiTheme.primaryText(activity), true), fullWrap(activity, 8));
+        TextView localLabel = text(activity, "本地地址", 14.5f,
+                UiTheme.primaryText(activity), true);
         EditText localInput = input(activity, "http://192.168.1.100:8080", localUrl);
+        localInput.setId(View.generateViewId());
+        localLabel.setLabelFor(localInput.getId());
+        content.addView(localLabel, fullWrap(activity, 8));
         localInput.setImeOptions(EditorInfo.IME_ACTION_NEXT);
         content.addView(localInput, fullWrap(activity, 16));
 
-        content.addView(text(activity, "公网地址", 14.5f,
-                UiTheme.primaryText(activity), true), fullWrap(activity, 8));
+        TextView publicLabel = text(activity, "公网地址", 14.5f,
+                UiTheme.primaryText(activity), true);
         EditText publicInput = input(activity, "https://money.example.com", publicUrl);
+        publicInput.setId(View.generateViewId());
+        publicLabel.setLabelFor(publicInput.getId());
+        content.addView(publicLabel, fullWrap(activity, 8));
         publicInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
         content.addView(publicInput, fullWrap(activity, 18));
-
-        Switch quickActionsSwitch = new Switch(activity);
-        quickActionsSwitch.setText("显示快捷入口");
-        quickActionsSwitch.setTextSize(15);
-        quickActionsSwitch.setTextColor(UiTheme.primaryText(activity));
-        quickActionsSwitch.setChecked(showQuickActions);
-        quickActionsSwitch.setGravity(Gravity.CENTER_VERTICAL);
-        quickActionsSwitch.setMinHeight(dp(activity, 56));
-        quickActionsSwitch.setContentDescription("控制记账页面右侧的快捷中心入口是否显示");
-        content.addView(quickActionsSwitch, fullWrap(activity, 4));
-        TextView quickActionsHint = text(activity,
-                "关闭后仍可在记账页面双指快速双击，重新打开快捷中心。",
-                12.5f, UiTheme.tertiaryText(activity), false);
-        content.addView(quickActionsHint, fullWrap(activity, 18));
 
         Button save = new Button(activity);
         save.setText("保存并连接");
         save.setTextSize(16);
-        save.setTextColor(Color.WHITE);
-        save.setAllCaps(false);
-        save.setMinHeight(dp(activity, 52));
-        GradientDrawable saveBackground = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{Color.rgb(15, 118, 110), Color.rgb(13, 148, 136)});
-        saveBackground.setCornerRadius(dp(activity, 14));
-        save.setBackground(saveBackground);
+        UiComponents.stylePrimary(save);
         content.addView(save, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -159,8 +142,7 @@ public final class ServerSettingsPage {
                 return;
             }
             listener.onSaved(normalizedLocal == null ? "" : normalizedLocal,
-                    normalizedPublic == null ? "" : normalizedPublic,
-                    quickActionsSwitch.isChecked());
+                    normalizedPublic == null ? "" : normalizedPublic);
         });
         return scrollView;
     }
