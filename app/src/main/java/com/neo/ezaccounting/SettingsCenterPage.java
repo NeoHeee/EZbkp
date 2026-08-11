@@ -16,6 +16,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 public final class SettingsCenterPage {
+    private static final String ROOT_TAG = "settings_center_root";
     public interface Listener {
         void onClose();
         void onServerAddresses();
@@ -33,11 +34,16 @@ public final class SettingsCenterPage {
         public final String routeSummary;
         public final String interactionSummary;
         public final String securitySummary;
+        public final String appVersion;
+        public final String serverVersion;
 
-        public Model(String routeSummary, String interactionSummary, String securitySummary) {
+        public Model(String routeSummary, String interactionSummary, String securitySummary,
+                     String appVersion, String serverVersion) {
             this.routeSummary = routeSummary;
             this.interactionSummary = interactionSummary;
             this.securitySummary = securitySummary;
+            this.appVersion = appVersion;
+            this.serverVersion = serverVersion;
         }
     }
 
@@ -45,6 +51,7 @@ public final class SettingsCenterPage {
 
     public static View create(Activity activity, Model model, Listener listener) {
         ScrollView scroll = new ScrollView(activity);
+        scroll.setTag(ROOT_TAG);
         scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
         scroll.setBackgroundColor(UiTheme.background(activity));
@@ -86,6 +93,8 @@ public final class SettingsCenterPage {
 
         addSection(activity, content, "诊断与维护");
         LinearLayout diagnostics = card(activity);
+        addInfoRow(activity, diagnostics, "App 版本", model.appVersion, false);
+        addInfoRow(activity, diagnostics, "ezBookkeeping 服务端", model.serverVersion, false);
         addRow(activity, diagnostics, "检查更新", "获取最新正式版本",
                 listener::onCheckUpdate, false);
         addRow(activity, diagnostics, "WebView 内核", "查看当前网页运行环境",
@@ -98,6 +107,10 @@ public final class SettingsCenterPage {
                 listener::onClearSiteData, true, true);
         content.addView(data, fullWidth(activity, 0));
         return scroll;
+    }
+
+    public static boolean isRoot(View view) {
+        return view != null && ROOT_TAG.equals(view.getTag());
     }
 
     private static View header(Context context, Listener listener) {
@@ -140,6 +153,35 @@ public final class SettingsCenterPage {
     private static void addRow(Context context, LinearLayout card, String title,
                                String summary, Runnable action, boolean last) {
         addRow(context, card, title, summary, action, last, false);
+    }
+
+    private static void addInfoRow(Context context, LinearLayout card, String title,
+                                   String value, boolean last) {
+        LinearLayout row = new LinearLayout(context);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(context, 16), dp(context, 14), dp(context, 16), dp(context, 14));
+        row.setMinimumHeight(dp(context, 64));
+        row.setContentDescription(title + "。" + value);
+
+        TextView name = text(context, title, 15, UiTheme.primaryText(context), false);
+        row.addView(name, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView version = text(context, value, 14, UiTheme.secondaryText(context), false);
+        version.setGravity(Gravity.END);
+        row.addView(version, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        card.addView(row, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        if (!last) {
+            View divider = new View(context);
+            divider.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            divider.setBackgroundColor(UiTheme.border(context));
+            LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 1));
+            dividerParams.leftMargin = dp(context, 16);
+            card.addView(divider, dividerParams);
+        }
     }
 
     private static void addRow(Context context, LinearLayout card, String title,

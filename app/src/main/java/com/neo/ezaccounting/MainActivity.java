@@ -69,6 +69,9 @@ public class MainActivity extends FragmentActivity implements
     private TextView quickActionsButton;
     private Bundle pendingWebViewState;
     private boolean quickActionsEnabled = true;
+    private String cachedServerVersion;
+    private boolean serverVersionDetectionAttempted;
+    private boolean serverVersionRequestPending;
 
     private final Runnable backgroundStartupProbe = this::runPendingBackgroundStartupProbe;
     private final Runnable progressivePageRetry = this::runProgressivePageRetry;
@@ -463,6 +466,10 @@ public class MainActivity extends FragmentActivity implements
     }
 
     private void showSettingsCenter() {
+        showSettingsCenter(true);
+    }
+
+    private void showSettingsCenter(boolean refreshServerVersion) {
         rememberCurrentWebUrl();
         serverSettingsVisible = true;
         stateBeforeSettings = stateMachine.getState();
@@ -472,7 +479,11 @@ public class MainActivity extends FragmentActivity implements
         SettingsCenterPage.Model model = new SettingsCenterPage.Model(
                 routeSummary,
                 quickActionsEnabled ? "快捷入口已显示" : "快捷入口已隐藏",
-                AppSecurity.isEnabled(this) ? AppSecurity.getModeLabel(this) : "未开启保护");
+                AppSecurity.isEnabled(this) ? AppSecurity.getModeLabel(this) : "未开启保护",
+                "v" + BuildConfig.VERSION_NAME,
+                cachedServerVersion == null ?
+                        (serverVersionDetectionAttempted ? "未检测到" : "检测中…") :
+                        "v" + cachedServerVersion);
         showOverlay(SettingsCenterPage.create(this, model, new SettingsCenterPage.Listener() {
             @Override
             public void onClose() {
@@ -524,6 +535,21 @@ public class MainActivity extends FragmentActivity implements
                 confirmClearSiteData();
             }
         }));
+        if (refreshServerVersion) refreshServerVersion();
+    }
+
+    private void refreshServerVersion() {
+        if (serverVersionRequestPending || !webViewController.isPageReady()) return;
+        serverVersionRequestPending = true;
+        webViewController.requestServerVersion(version -> {
+            serverVersionRequestPending = false;
+            serverVersionDetectionAttempted = true;
+            cachedServerVersion = version;
+            if (overlayLayer.getChildCount() == 1 &&
+                    SettingsCenterPage.isRoot(overlayLayer.getChildAt(0))) {
+                showSettingsCenter(false);
+            }
+        });
     }
 
     private void showInteractionSettings() {
@@ -599,6 +625,10 @@ public class MainActivity extends FragmentActivity implements
         String current = webViewController.currentUrl();
         if (current == null) current = lastWebUrl;
         String targetUrl = remapUrl(oldBase, current, target.url);
+        if (changed) {
+            cachedServerVersion = null;
+            serverVersionDetectionAttempted = false;
+        }
         restoredBaseUrl = target.url;
 
         if (!webViewController.isCreated()) {

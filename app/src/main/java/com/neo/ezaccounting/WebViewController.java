@@ -22,7 +22,14 @@ import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.lang.ref.WeakReference;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class WebViewController {
     public enum FailureType {
@@ -62,6 +69,7 @@ public final class WebViewController {
 
     private static WeakReference<WebViewController> activeController =
             new WeakReference<>(null);
+    private static final ExecutorService metadataExecutor = Executors.newCachedThreadPool();
 
     private final Activity activity;
     private final Host host;
@@ -155,6 +163,56 @@ public final class WebViewController {
                 "if(!m){m=document.createElement('meta');m.name='color-scheme';document.head.appendChild(m);}" +
                 "m.content='light dark';window.dispatchEvent(new Event('native-theme-change'));" +
                 "}catch(e){}})();", null);
+    }
+
+    public void requestServerVersion(ValueCallback<String> callback) {
+        if (callback == null) return;
+        String pageUrl = currentUrl();
+        if (webView == null || !pageReady || pageUrl == null) {
+            callback.onReceiveValue(null);
+            return;
+        }
+        String cookie = CookieManager.getInstance().getCookie(pageUrl);
+        Uri page = Uri.parse(pageUrl);
+        Uri endpoint = page.buildUpon().path(ServerVersionDetector.API_PATH)
+                .clearQuery().fragment(null).build();
+        metadataExecutor.execute(() -> {
+            String version = fetchServerVersion(endpoint.toString(), cookie);
+            activity.runOnUiThread(() -> {
+                if (!activity.isFinishing() && !activity.isDestroyed()) {
+                    callback.onReceiveValue(version);
+                }
+            });
+        });
+    }
+
+    private String fetchServerVersion(String endpoint, String cookie) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(endpoint).openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            connection.setRequestProperty("Accept", "application/json");
+            if (cookie != null && !cookie.isEmpty()) {
+                connection.setRequestProperty("Cookie", cookie);
+            }
+            if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) return null;
+            StringBuilder body = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                    connection.getInputStream(), StandardCharsets.UTF_8))) {
+                char[] buffer = new char[2048];
+                int count;
+                while ((count = reader.read(buffer)) >= 0 && body.length() < 32768) {
+                    body.append(buffer, 0, Math.min(count, 32768 - body.length()));
+                }
+            }
+            return ServerVersionDetector.parseApiResponse(body.toString());
+        } catch (Exception ignored) {
+            return null;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
     }
 
     public static boolean reloadActive() {

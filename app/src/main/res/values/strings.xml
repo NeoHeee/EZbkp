@@ -7,6 +7,6 @@
     <string name="shortcut_security_long">配置进入 App 的安全验证</string>
     <string name="shortcut_lock_short">立即锁定</string>
     <string name="shortcut_lock_long">立即进入身份验证</string>
-    <string name="shortcut_quick_actions_short">切换快捷入口</string>
+    <string name="shortcut_quick_actions_short">快捷入口</string>
     <string name="shortcut_quick_actions_long">显示或隐藏快捷中心入口</string>
 </resources>
