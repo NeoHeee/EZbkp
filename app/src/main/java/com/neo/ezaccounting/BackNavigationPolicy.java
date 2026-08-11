@@ -34,12 +34,10 @@ public final class BackNavigationPolicy {
         }
         if (safeState == AppStateMachine.State.READY ||
                 safeState == AppStateMachine.State.LOADING_WEB) {
-            // The root page may still have duplicate WebView history entries after redirects,
-            // route restoration or switching between local/public endpoints. Once the user is
-            // visibly at the root page, those stale entries must not take precedence over the
-            // app-level double-back-to-exit behavior.
+            // Match normal browser behavior: a real WebView history entry always wins. Page
+            // identity is only a fallback for SPA routes that do not create browser history.
+            if (canGoBack) return Action.WEB_BACK;
             if (!atHome) {
-                if (canGoBack) return Action.WEB_BACK;
                 return Action.GO_HOME;
             }
         }

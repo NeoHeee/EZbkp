@@ -15,6 +15,7 @@ public final class UnifiedMainActivity extends MainActivity {
     private static final String KEY_PUBLIC_URL = "public_url";
 
     private long unifiedLastBackPressedAt;
+    private boolean pageIdentityCheckInProgress;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -51,11 +52,24 @@ public final class UnifiedMainActivity extends MainActivity {
         }
 
         String homeUrl = resolveHomeUrl(webView.getUrl());
+        if (webView.canGoBack()) {
+            performBackDecision(state, webView, hasConfiguredRoute,
+                    true, false, homeUrl, System.currentTimeMillis());
+            return;
+        }
+
         boolean urlAtHome = BackNavigationPolicy.isAtHome(homeUrl, webView.getUrl());
-        EzBookkeepingPageDetector.PageIdentity identity = cachedPageIdentity();
-        boolean atHome = EzBookkeepingPageDetector.resolveHome(identity, urlAtHome);
-        performBackDecision(state, webView, hasConfiguredRoute, webView.canGoBack(),
-                atHome, homeUrl, System.currentTimeMillis());
+        if (pageIdentityCheckInProgress) return;
+        pageIdentityCheckInProgress = true;
+        webView.evaluateJavascript(EzBookkeepingPageDetector.homeDetectionScript(), result -> {
+            pageIdentityCheckInProgress = false;
+            if (isFinishing() || isDestroyed() || webView.getParent() == null) return;
+            EzBookkeepingPageDetector.PageIdentity identity =
+                    EzBookkeepingPageDetector.parseIdentity(result);
+            boolean atHome = EzBookkeepingPageDetector.resolveHome(identity, urlAtHome);
+            performBackDecision(currentAppState(), webView, hasConfiguredRoute(),
+                    webView.canGoBack(), atHome, homeUrl, System.currentTimeMillis());
+        });
     }
 
     private void performBackDecision(AppStateMachine.State state,

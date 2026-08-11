@@ -15,13 +15,10 @@ public class BackNavigationPolicyTest {
     }
 
     @Test
-    public void homeIgnoresStaleWebHistoryAndUsesDoubleBackExit() {
-        assertEquals(BackNavigationPolicy.Action.SHOW_EXIT_HINT,
+    public void webHistoryTakesPriorityEvenWhenPageLooksLikeHome() {
+        assertEquals(BackNavigationPolicy.Action.WEB_BACK,
                 BackNavigationPolicy.decide(AppStateMachine.State.READY,
                         true, true, true, 10_000L, 0L));
-        assertEquals(BackNavigationPolicy.Action.EXIT,
-                BackNavigationPolicy.decide(AppStateMachine.State.READY,
-                        true, true, true, 11_000L, 10_000L));
     }
 
     @Test
