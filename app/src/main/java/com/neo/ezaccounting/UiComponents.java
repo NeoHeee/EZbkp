@@ -48,6 +48,42 @@ public final class UiComponents {
         button.setBackground(surface(context));
     }
 
+    public static void styleAccentAction(Button button) {
+        styleCompactAction(button, UiTheme.softAccent(button.getContext()),
+                UiTheme.accent(button.getContext()), UiTheme.accent(button.getContext()));
+    }
+
+    public static void styleGoldAction(Button button) {
+        styleCompactAction(button, UiTheme.softGold(button.getContext()),
+                UiTheme.gold(button.getContext()), UiTheme.accentDark(button.getContext()));
+    }
+
+    public static void styleDangerAction(Button button) {
+        styleCompactAction(button, UiTheme.softDanger(button.getContext()),
+                UiTheme.danger(button.getContext()), UiTheme.danger(button.getContext()));
+    }
+
+    private static void styleCompactAction(Button button, int fill, int stroke, int text) {
+        Context context = button.getContext();
+        button.setAllCaps(false);
+        button.setTextSize(14);
+        button.setTextColor(text);
+        button.setMinHeight(dp(context, MIN_TOUCH_DP));
+        button.setMinWidth(0);
+        button.setPadding(dp(context, 8), 0, dp(context, 8), 0);
+        button.setElevation(0);
+        button.setStateListAnimator(null);
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(fill);
+        background.setStroke(dp(context, 1), stroke);
+        background.setCornerRadius(dp(context, 12));
+        button.setBackground(new RippleDrawable(ColorStateList.valueOf(Color.argb(
+                UiTheme.isDark(context) ? 64 : 40, Color.red(text), Color.green(text),
+                Color.blue(text))), background, null));
+        button.setMinimumWidth(0);
+        button.setGravity(android.view.Gravity.CENTER);
+    }
+
     public static void styleIconButton(TextView button) {
         Context context = button.getContext();
         button.setGravity(android.view.Gravity.CENTER);

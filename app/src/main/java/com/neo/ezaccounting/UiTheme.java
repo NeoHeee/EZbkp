@@ -79,6 +79,10 @@ public final class UiTheme {
         return isDark(context) ? Color.rgb(248, 113, 113) : Color.rgb(190, 24, 34);
     }
 
+    public static int softDanger(Context context) {
+        return isDark(context) ? Color.rgb(70, 35, 38) : Color.rgb(252, 235, 235);
+    }
+
     public static int webBackground(Context context) {
         return isDark(context) ? Color.rgb(16, 22, 23) : Color.WHITE;
     }
