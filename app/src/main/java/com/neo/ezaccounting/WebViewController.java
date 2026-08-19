@@ -96,6 +96,7 @@ public final class WebViewController {
     private float firstTwoFingerTapX;
     private float firstTwoFingerTapY;
     private boolean suppressNextIdentityRefresh;
+    private boolean preloadMode;
 
     public WebViewController(Activity activity, Host host,
                              DownloadController downloadController) {
@@ -151,6 +152,25 @@ public final class WebViewController {
             loadUrl(initialUrl == null || initialUrl.trim().isEmpty() ? baseUrl : initialUrl);
         }
         return root;
+    }
+
+    public void setPreloadMode(boolean enabled) {
+        preloadMode = enabled;
+        if (webView == null) return;
+        webView.setEnabled(!enabled);
+        webView.setFocusable(!enabled);
+        webView.setFocusableInTouchMode(!enabled);
+        webView.setImportantForAccessibility(enabled ?
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS :
+                View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        if (!enabled && pageReady) {
+            syncPageTheme();
+            refreshPageIdentity();
+        }
+    }
+
+    public void stopLoading() {
+        if (webView != null) webView.stopLoading();
     }
 
     public void saveState(Bundle outState) {
@@ -396,7 +416,7 @@ public final class WebViewController {
                 pageReady = true;
                 completePageProgress();
                 syncPageTheme();
-                refreshPageIdentity();
+                if (!preloadMode) refreshPageIdentity();
                 host.onPageReady(url);
             }
 
@@ -574,6 +594,7 @@ public final class WebViewController {
     }
 
     private void refreshPageIdentity() {
+        if (preloadMode) return;
         WebView active = webView;
         if (active == null || identityCheckInProgress) return;
         identityCheckInProgress = true;

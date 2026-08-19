@@ -30,6 +30,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
     private TextView currentMode;
     private Button relockButton;
     private Button screenOffButton;
+    private Button preloadButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -94,6 +95,10 @@ public class SecuritySettingsActivity extends FragmentActivity {
         screenOffButton = optionButton("熄屏后立即锁定", "手机变为非交互状态后，下次进入立即验证");
         root.addView(screenOffButton, fullWrap(dp(20)));
         screenOffButton.setOnClickListener(v -> toggleScreenOffLock());
+
+        preloadButton = optionButton("解锁时预加载首页", "验证期间在隐藏状态加载首页，加快解锁后的显示");
+        root.addView(preloadButton, fullWrap(dp(20)));
+        preloadButton.setOnClickListener(v -> toggleUnlockPreload());
 
         TextView methodTitle = sectionTitle("验证方式");
         root.addView(methodTitle, fullWrap(dp(10)));
@@ -370,10 +375,17 @@ public class SecuritySettingsActivity extends FragmentActivity {
         Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
     }
 
+    private void toggleUnlockPreload() {
+        boolean enabled = !AppSecurity.isPreloadWhileLocked(this);
+        AppSecurity.setPreloadWhileLocked(this, enabled);
+        policyChanged(enabled ? "已开启解锁时预加载" : "已关闭解锁时预加载");
+    }
+
     private void refreshSummary() {
         currentMode.setText("当前方式：" + AppSecurity.getModeLabel(this) +
                 "\n自动锁定：" + AppSecurity.getRelockTimeoutLabel(this) +
-                "\n熄屏锁定：" + (AppSecurity.isLockOnScreenOff(this) ? "开启" : "关闭"));
+                "\n熄屏锁定：" + (AppSecurity.isLockOnScreenOff(this) ? "开启" : "关闭") +
+                "\n解锁预加载：" + (AppSecurity.isPreloadWhileLocked(this) ? "开启" : "关闭"));
         if (relockButton != null) {
             relockButton.setText("自动锁定时间：" + AppSecurity.getRelockTimeoutLabel(this) +
                     "\n设置 App 切到后台后多长时间重新验证");
@@ -382,6 +394,11 @@ public class SecuritySettingsActivity extends FragmentActivity {
             screenOffButton.setText("熄屏后立即锁定：" +
                     (AppSecurity.isLockOnScreenOff(this) ? "开启" : "关闭") +
                     "\n手机变为非交互状态后，下次进入立即验证");
+        }
+        if (preloadButton != null) {
+            preloadButton.setText("解锁时预加载首页：" +
+                    (AppSecurity.isPreloadWhileLocked(this) ? "开启" : "关闭") +
+                    "\n验证期间在隐藏状态加载首页，加快解锁后的显示");
         }
     }
 

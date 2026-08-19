@@ -28,6 +28,7 @@ public final class AppSecurity {
     private static final String KEY_HASH = "secret_hash";
     private static final String KEY_RELOCK_TIMEOUT = "relock_timeout_ms";
     private static final String KEY_LOCK_ON_SCREEN_OFF = "lock_on_screen_off";
+    private static final String KEY_PRELOAD_WHILE_LOCKED = "preload_while_locked";
     private static final String KEY_FAILED_ATTEMPTS = "failed_attempts";
     private static final String KEY_BLOCKED_UNTIL = "blocked_until";
     private static final int ITERATIONS = 120_000;
@@ -86,6 +87,14 @@ public final class AppSecurity {
 
     public static void setLockOnScreenOff(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_LOCK_ON_SCREEN_OFF, enabled).apply();
+    }
+
+    public static boolean isPreloadWhileLocked(Context context) {
+        return prefs(context).getBoolean(KEY_PRELOAD_WHILE_LOCKED, true);
+    }
+
+    public static void setPreloadWhileLocked(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_PRELOAD_WHILE_LOCKED, enabled).apply();
     }
 
     public static void setBiometric(Context context) {

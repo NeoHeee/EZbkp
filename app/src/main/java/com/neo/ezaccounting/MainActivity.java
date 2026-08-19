@@ -14,10 +14,13 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.widget.FrameLayout;
@@ -53,6 +56,8 @@ public class MainActivity extends FragmentActivity implements
     private static final long BACKGROUND_STARTUP_PROBE_FALLBACK_MS = 2500L;
     private static final long PROGRESSIVE_PAGE_RETRY_DELAY_MS = 900L;
     private static final long QUICK_ACTIONS_PREWARM_DELAY_MS = 400L;
+    private static final long UNLOCK_PRELOAD_DELAY_MS = 200L;
+    private static final long UNLOCK_PRELOAD_TIMEOUT_MS = 8000L;
 
     private SharedPreferences preferences;
     private String localUrl;
@@ -77,6 +82,9 @@ public class MainActivity extends FragmentActivity implements
     private boolean serverVersionDetectionAttempted;
     private boolean serverVersionRequestPending;
     private Runnable pendingWifiPermissionRefresh;
+    private boolean unlockPreloadActive;
+    private boolean unlockPreloadFailed;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private AppStateMachine stateMachine;
     private AppStateMachine.State stateBeforeLock = AppStateMachine.State.INITIALIZING;
@@ -94,6 +102,13 @@ public class MainActivity extends FragmentActivity implements
                 stateMachine.getState() == AppStateMachine.State.LOCKED ||
                 stateMachine.getState() == AppStateMachine.State.SETTINGS) return;
         QuickActionsSheet.prewarm(this, quickActionsModel());
+    };
+    private final Runnable unlockPreload = this::startUnlockPreload;
+    private final Runnable unlockPreloadTimeout = () -> {
+        if (!unlockPreloadActive || webViewController == null ||
+                webViewController.isPageReady()) return;
+        unlockPreloadFailed = true;
+        webViewController.stopLoading();
     };
 
     private ValueCallback<Uri[]> filePathCallback;
@@ -206,9 +221,6 @@ public class MainActivity extends FragmentActivity implements
         networkMonitor = new NetworkMonitor(this, this::onDefaultNetworkChanged);
         registerScreenOffReceiver();
 
-        if (ShortcutActions.LOCK.equals(pendingShortcutAction) && AppSecurity.isEnabled(this)) {
-            pendingShortcutAction = null;
-        }
         handleLifecycleAction(lifecycleCoordinator.onCreate(AppSecurity.isEnabled(this)));
     }
 
@@ -368,13 +380,33 @@ public class MainActivity extends FragmentActivity implements
 
     private void initializeApp() {
         if (!lifecycleCoordinator.isInitialized()) lifecycleCoordinator.markInitialized();
-        if (stateMachine.getState() == AppStateMachine.State.LOCKED) {
+        if (stateMachine.getState() == AppStateMachine.State.LOCKED &&
+                !webViewController.isCreated()) {
             transitionTo(AppStateMachine.State.INITIALIZING);
         }
 
-        if (ShortcutActions.ROUTES.equals(pendingShortcutAction)) {
+        if (ShortcutActions.SETTINGS.equals(pendingShortcutAction)) {
             pendingShortcutAction = null;
-            showServerSettings();
+            if (webViewController.isCreated()) {
+                if (unlockPreloadFailed) {
+                    unlockPreloadFailed = false;
+                    webViewController.reload();
+                }
+                scheduleBackgroundStartupProbe();
+            }
+            showSettingsCenter();
+        } else if (webViewController.isCreated()) {
+            transitionTo(webViewController.isPageReady() ?
+                    AppStateMachine.State.READY : AppStateMachine.State.LOADING_WEB);
+            if (unlockPreloadFailed) {
+                unlockPreloadFailed = false;
+                webViewController.reload();
+            }
+            scheduleBackgroundStartupProbe();
+            if (webViewController.isPageReady()) {
+                getWindow().getDecorView().postDelayed(
+                        quickActionsPrewarm, QUICK_ACTIONS_PREWARM_DELAY_MS);
+            }
         } else if (routeCoordinator.hasConfiguredRoute()) {
             if (routeCoordinator.activateFastStartRoute()) {
                 scheduleBackgroundStartupProbe();
@@ -409,28 +441,7 @@ public class MainActivity extends FragmentActivity implements
         if (pendingShortcutAction == null || lifecycleCoordinator.isAuthInProgress()) return;
         String action = pendingShortcutAction;
         pendingShortcutAction = null;
-        if (ShortcutActions.ROUTES.equals(action)) {
-            showServerSettings();
-        } else if (ShortcutActions.SECURITY.equals(action)) {
-            if (!AppSecurity.isEnabled(this) ||
-                    System.currentTimeMillis() - lifecycleCoordinator.getLastUnlockAt() < 10_000L) {
-                openSecuritySettings();
-            } else {
-                requestSecuritySettings();
-            }
-        } else if (ShortcutActions.LOCK.equals(action)) {
-            lockImmediately();
-        } else if (ShortcutActions.TOGGLE_QUICK_ACTIONS.equals(action)) {
-            toggleQuickActions();
-        }
-    }
-
-    private void toggleQuickActions() {
-        quickActionsEnabled = !quickActionsEnabled;
-        preferences.edit().putBoolean(KEY_SHOW_QUICK_ACTIONS, quickActionsEnabled).apply();
-        updateQuickActionsVisibility();
-        Toast.makeText(this, quickActionsEnabled ?
-                "快捷入口已显示" : "快捷入口已隐藏", Toast.LENGTH_SHORT).show();
+        if (ShortcutActions.SETTINGS.equals(action)) showSettingsCenter();
     }
 
     private void requestAppUnlock() {
@@ -439,14 +450,17 @@ public class MainActivity extends FragmentActivity implements
         stateBeforeLock = stateMachine.getState();
         lifecycleCoordinator.beginAuth();
         transitionTo(AppStateMachine.State.LOCKED);
+        beginProtectedUnlockWindow();
         Intent intent = new Intent(this, LockActivity.class);
         intent.putExtra(LockActivity.EXTRA_REASON, "请验证身份后进入应用");
         appUnlockLauncher.launch(intent);
     }
 
     private void handleAppUnlockResult(int resultCode) {
+        boolean success = resultCode == Activity.RESULT_OK;
+        finishProtectedUnlockWindow(success);
         AppLifecycleCoordinator.Action action = lifecycleCoordinator.onUnlockResult(
-                resultCode == Activity.RESULT_OK, System.currentTimeMillis());
+                success, System.currentTimeMillis());
         if (action == AppLifecycleCoordinator.Action.FINISH_APP) {
             finishAndRemoveTask();
             return;
@@ -464,6 +478,51 @@ public class MainActivity extends FragmentActivity implements
         }
         transitionTo(target);
         getWindow().getDecorView().post(this::handlePendingShortcutAction);
+    }
+
+    private void beginProtectedUnlockWindow() {
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        if (webLayer != null) webLayer.setVisibility(View.INVISIBLE);
+        if (quickActionsButton != null) quickActionsButton.setVisibility(View.GONE);
+        if (!lifecycleCoordinator.isInitialized() &&
+                AppSecurity.isPreloadWhileLocked(this) &&
+                routeCoordinator.hasConfiguredRoute()) {
+            mainHandler.removeCallbacks(unlockPreload);
+            mainHandler.postDelayed(unlockPreload, UNLOCK_PRELOAD_DELAY_MS);
+        }
+    }
+
+    private void startUnlockPreload() {
+        if (!lifecycleCoordinator.isAuthInProgress() || lifecycleCoordinator.isInitialized() ||
+                isFinishing() || isDestroyed()) return;
+        String ssid = WifiRouteContext.currentSsid(this);
+        boolean wifiConnected = WifiRouteContext.isWifiConnected(this);
+        String exactLocalUrl = LocalRouteRules.selectExactWifiMatch(
+                localRouteRules, ssid, wifiConnected);
+        unlockPreloadActive = true;
+        unlockPreloadFailed = false;
+        webViewController.setPreloadMode(true);
+        if (!routeCoordinator.activateFastStartRoute(exactLocalUrl)) {
+            unlockPreloadActive = false;
+            webViewController.setPreloadMode(false);
+            return;
+        }
+        mainHandler.postDelayed(unlockPreloadTimeout, UNLOCK_PRELOAD_TIMEOUT_MS);
+    }
+
+    private void finishProtectedUnlockWindow(boolean success) {
+        mainHandler.removeCallbacks(unlockPreload);
+        mainHandler.removeCallbacks(unlockPreloadTimeout);
+        if (success) {
+            if (webLayer != null) webLayer.setVisibility(View.VISIBLE);
+            if (webViewController != null) webViewController.setPreloadMode(false);
+        } else if (unlockPreloadActive && webViewController != null) {
+            webViewController.stopLoading();
+            webViewController.destroy();
+            if (webLayer != null) webLayer.removeAllViews();
+        }
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        unlockPreloadActive = false;
     }
 
     private void showServerSettings() {
@@ -670,7 +729,7 @@ public class MainActivity extends FragmentActivity implements
         restoredBaseUrl = target.url;
 
         if (!webViewController.isCreated()) {
-            transitionTo(AppStateMachine.State.LOADING_WEB);
+            if (!unlockPreloadActive) transitionTo(AppStateMachine.State.LOADING_WEB);
             webLayer.removeAllViews();
             Bundle restoreState = restoredBaseUrl != null && restoredBaseUrl.equals(target.url) ?
                     pendingWebViewState : null;
@@ -678,7 +737,8 @@ public class MainActivity extends FragmentActivity implements
             webLayer.addView(webViewController.create(target.url, targetUrl, restoreState),
                     new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT));
-            hideOverlay();
+            if (unlockPreloadActive) webViewController.setPreloadMode(true);
+            else hideOverlay();
         } else if (changed) {
             hideOverlay();
             webViewController.setBaseUrl(target.url);
@@ -795,9 +855,10 @@ public class MainActivity extends FragmentActivity implements
         lastWebUrl = url;
         lastFailure = null;
         consecutivePageFailures = 0;
+        routeCoordinator.markPageSuccess();
+        if (unlockPreloadActive) return;
         getWindow().getDecorView().removeCallbacks(progressivePageRetry);
         hideRecoveryBanner();
-        routeCoordinator.markPageSuccess();
         if (backgroundStartupProbePending) {
             getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
             runPendingBackgroundStartupProbe();
@@ -813,6 +874,12 @@ public class MainActivity extends FragmentActivity implements
 
     @Override
     public void onPageFailure(WebViewController.Failure failure) {
+        if (unlockPreloadActive) {
+            unlockPreloadFailed = true;
+            lastFailure = failure;
+            webViewController.stopLoading();
+            return;
+        }
         backgroundStartupProbePending = false;
         getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
         getWindow().getDecorView().removeCallbacks(quickActionsPrewarm);
@@ -1288,6 +1355,7 @@ public class MainActivity extends FragmentActivity implements
 
     @Override
     protected void onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null);
         getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
         getWindow().getDecorView().removeCallbacks(progressivePageRetry);
         getWindow().getDecorView().removeCallbacks(quickActionsPrewarm);

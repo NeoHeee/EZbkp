@@ -72,14 +72,14 @@ public final class SettingsCenterPage {
                 listener::onServerAddresses, false);
         addRow(activity, settings, "线路状态", "当前线路与延迟",
                 listener::onRouteStatus, false);
-        addSwitchRow(activity, settings, "快捷入口", model.quickActionsEnabled,
-                listener::onQuickActionsChanged, false);
         addRow(activity, settings, "应用锁", model.securitySummary,
                 listener::onSecuritySettings, false);
-        addInfoRow(activity, settings, "App 版本", model.appVersion, false);
-        addInfoRow(activity, settings, "ezBookkeeping 服务端", model.serverVersion, false);
+        addSwitchRow(activity, settings, "快捷入口", model.quickActionsEnabled,
+                listener::onQuickActionsChanged, false);
         addRow(activity, settings, "检查更新", null,
                 listener::onCheckUpdate, false);
+        addInfoRow(activity, settings, "App 版本", model.appVersion, false);
+        addInfoRow(activity, settings, "ezBookkeeping 服务端", model.serverVersion, false);
         addRow(activity, settings, "WebView 内核", null,
                 listener::onWebViewInfo, false);
         addRow(activity, settings, "清除登录与网页数据", null,

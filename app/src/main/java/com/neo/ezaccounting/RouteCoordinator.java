@@ -108,7 +108,11 @@ public final class RouteCoordinator {
     }
 
     public boolean activateFastStartRoute() {
-        FastStartPolicy.Candidate candidate = FastStartPolicy.select(localUrl, publicUrl);
+        return activateFastStartRoute(localUrl);
+    }
+
+    public boolean activateFastStartRoute(String eligibleLocalUrl) {
+        FastStartPolicy.Candidate candidate = FastStartPolicy.select(eligibleLocalUrl, publicUrl);
         if (candidate == null) return false;
 
         long latency = candidate.type == RouteManager.TYPE_LOCAL ?
