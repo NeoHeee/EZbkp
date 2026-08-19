@@ -211,7 +211,7 @@ public class SecuritySettingsActivity extends FragmentActivity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(16), dp(8), dp(12), dp(8));
-        row.setMinHeight(dp(72));
+        row.setMinimumHeight(dp(72));
         row.setClickable(true);
         row.setFocusable(true);
 
