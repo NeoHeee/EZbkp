@@ -5,6 +5,7 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
@@ -65,6 +66,8 @@ public final class WebViewController {
                                     WebChromeClient.FileChooserParams params);
         void onPageStarted(String url);
         void onPageReady(String url);
+        void onPageContentReady(String url, long htmlReadyMs, long contentReadyMs,
+                                boolean timedOut);
         void onPageFailure(Failure failure);
         void onOpenQuickActions();
     }
@@ -72,6 +75,8 @@ public final class WebViewController {
     private static WeakReference<WebViewController> activeController =
             new WeakReference<>(null);
     private static final ExecutorService metadataExecutor = Executors.newSingleThreadExecutor();
+    private static final long CONTENT_READY_POLL_MS = 120L;
+    private static final long CONTENT_READY_TIMEOUT_MS = 15_000L;
 
     private final Activity activity;
     private final Host host;
@@ -96,6 +101,12 @@ public final class WebViewController {
     private float firstTwoFingerTapX;
     private float firstTwoFingerTapY;
     private boolean suppressNextIdentityRefresh;
+    private boolean preloadMode;
+    private int pageLoadGeneration;
+    private long pageStartedAt;
+    private long pageFinishedAt;
+    private boolean contentReady;
+    private int contentReadyConfirmations;
 
     public WebViewController(Activity activity, Host host,
                              DownloadController downloadController) {
@@ -141,16 +152,43 @@ public final class WebViewController {
         setupHiddenGesture();
         boolean restored = restoredState != null && webView.restoreState(restoredState) != null;
         if (restored) {
+            pageLoadGeneration++;
+            pageStartedAt = SystemClock.elapsedRealtime();
             pageReady = true;
             syncPageTheme();
             webView.post(() -> {
-                refreshPageIdentity();
+                if (!preloadMode) refreshPageIdentity();
                 host.onPageReady(currentUrl());
+                pageFinishedAt = SystemClock.elapsedRealtime();
+                scheduleContentReadyCheck(pageLoadGeneration, currentUrl());
             });
         } else {
             loadUrl(initialUrl == null || initialUrl.trim().isEmpty() ? baseUrl : initialUrl);
         }
         return root;
+    }
+
+    public void setPreloadMode(boolean enabled) {
+        preloadMode = enabled;
+        if (webView == null) return;
+        webView.setEnabled(!enabled);
+        webView.setFocusable(!enabled);
+        webView.setFocusableInTouchMode(!enabled);
+        webView.setImportantForAccessibility(enabled ?
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS :
+                View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        if (!enabled && pageReady) {
+            syncPageTheme();
+            refreshPageIdentity();
+        }
+    }
+
+    public void stopLoading() {
+        if (webView != null) webView.stopLoading();
+    }
+
+    public boolean isContentReady() {
+        return contentReady;
     }
 
     public void saveState(Bundle outState) {
@@ -383,6 +421,11 @@ public final class WebViewController {
 
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                pageLoadGeneration++;
+                pageStartedAt = SystemClock.elapsedRealtime();
+                pageFinishedAt = 0L;
+                contentReady = false;
+                contentReadyConfirmations = 0;
                 pageReady = false;
                 mainFrameFailed = false;
                 pageIdentityCache.invalidate();
@@ -396,8 +439,10 @@ public final class WebViewController {
                 pageReady = true;
                 completePageProgress();
                 syncPageTheme();
-                refreshPageIdentity();
+                if (!preloadMode) refreshPageIdentity();
                 host.onPageReady(url);
+                pageFinishedAt = SystemClock.elapsedRealtime();
+                scheduleContentReadyCheck(pageLoadGeneration, url);
             }
 
             @Override
@@ -574,6 +619,7 @@ public final class WebViewController {
     }
 
     private void refreshPageIdentity() {
+        if (preloadMode) return;
         WebView active = webView;
         if (active == null || identityCheckInProgress) return;
         identityCheckInProgress = true;
@@ -592,6 +638,45 @@ public final class WebViewController {
             pageIdentityCache.update(identityUrl, EzBookkeepingPageDetector.parseIdentity(result));
             deliverIdentityCallbacks(pageIdentityCache.get());
         });
+    }
+
+    private void scheduleContentReadyCheck(int generation, String url) {
+        WebView active = webView;
+        if (active == null) return;
+        active.postDelayed(() -> checkContentReady(generation, url), CONTENT_READY_POLL_MS);
+    }
+
+    private void checkContentReady(int generation, String url) {
+        WebView active = webView;
+        if (active == null || generation != pageLoadGeneration || contentReady) return;
+        long now = SystemClock.elapsedRealtime();
+        boolean timedOut = pageStartedAt > 0L && now - pageStartedAt >= CONTENT_READY_TIMEOUT_MS;
+        if (timedOut) {
+            notifyContentReady(url, true, now);
+            return;
+        }
+        active.evaluateJavascript("(function(){try{" +
+                "if(document.readyState!=='complete')return false;" +
+                "return document.querySelectorAll('.skeleton-text').length===0;" +
+                "}catch(e){return false;}})();", value -> {
+            if (active != webView || generation != pageLoadGeneration || contentReady) return;
+            if ("true".equals(value)) contentReadyConfirmations++;
+            else contentReadyConfirmations = 0;
+            if (contentReadyConfirmations >= 2) {
+                notifyContentReady(url, false, SystemClock.elapsedRealtime());
+            } else {
+                scheduleContentReadyCheck(generation, url);
+            }
+        });
+    }
+
+    private void notifyContentReady(String url, boolean timedOut, long now) {
+        if (contentReady) return;
+        contentReady = true;
+        long htmlMs = pageFinishedAt > 0L && pageStartedAt > 0L ?
+                pageFinishedAt - pageStartedAt : -1L;
+        long contentMs = pageStartedAt > 0L ? now - pageStartedAt : -1L;
+        host.onPageContentReady(url, htmlMs, contentMs, timedOut);
     }
 
     private void deliverIdentityCallbacks(EzBookkeepingPageDetector.PageIdentity identity) {
@@ -649,6 +734,8 @@ public final class WebViewController {
             pageProgress = null;
         }
         pageReady = false;
+        contentReady = false;
+        pageLoadGeneration++;
         mainFrameFailed = false;
         pageIdentityCache.invalidate();
     }

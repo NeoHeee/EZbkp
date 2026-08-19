@@ -75,4 +75,16 @@ public final class LocalRouteRules {
         }
         return null;
     }
+
+    public static String selectExactWifiMatch(List<LocalRouteRule> rules, String currentSsid,
+                                               boolean wifiConnected) {
+        if (rules == null || rules.isEmpty() || !wifiConnected || currentSsid == null) return "";
+        String normalizedSsid = currentSsid.trim();
+        if (normalizedSsid.isEmpty()) return "";
+        for (LocalRouteRule rule : rules) {
+            if (rule != null && !rule.ssid.isEmpty() &&
+                    rule.ssid.equalsIgnoreCase(normalizedSsid)) return rule.url;
+        }
+        return "";
+    }
 }

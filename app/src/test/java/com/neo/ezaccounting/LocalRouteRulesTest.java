@@ -28,6 +28,22 @@ public class LocalRouteRulesTest {
     }
 
     @Test
+    public void preloadOnlyUsesAnExactWifiMapping() {
+        List<LocalRouteRule> rules = Arrays.asList(
+                new LocalRouteRule("", "http://default"),
+                new LocalRouteRule("家里", "Home-5G", "http://home"));
+
+        assertEquals("http://home",
+                LocalRouteRules.selectExactWifiMatch(rules, "home-5g", true));
+        assertEquals("",
+                LocalRouteRules.selectExactWifiMatch(rules, "Office", true));
+        assertEquals("",
+                LocalRouteRules.selectExactWifiMatch(rules, null, true));
+        assertEquals("",
+                LocalRouteRules.selectExactWifiMatch(rules, "Home-5G", false));
+    }
+
+    @Test
     public void defaultRuleIsBoundToWifi() {
         List<LocalRouteRule> rules = Arrays.asList(
                 new LocalRouteRule("", "http://default"));

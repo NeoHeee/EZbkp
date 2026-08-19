@@ -7,12 +7,6 @@ import static org.junit.Assert.assertTrue;
 public class ShortcutActionNamesTest {
     @Test
     public void shortcutActionsStayPackageScopedAndDistinct() {
-        assertTrue(ShortcutActions.ROUTES.startsWith("com.neo.ezaccounting.action."));
-        assertTrue(ShortcutActions.SECURITY.startsWith("com.neo.ezaccounting.action."));
-        assertTrue(ShortcutActions.LOCK.startsWith("com.neo.ezaccounting.action."));
-        assertTrue(ShortcutActions.TOGGLE_QUICK_ACTIONS.startsWith(
-                "com.neo.ezaccounting.action."));
-        assertTrue(!ShortcutActions.ROUTES.equals(ShortcutActions.SECURITY));
-        assertTrue(!ShortcutActions.LOCK.equals(ShortcutActions.TOGGLE_QUICK_ACTIONS));
+        assertTrue(ShortcutActions.SETTINGS.startsWith("com.neo.ezaccounting.action."));
     }
 }

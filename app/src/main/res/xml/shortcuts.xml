@@ -1,46 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut
-        android:shortcutId="routes"
+        android:shortcutId="settings"
         android:enabled="true"
-        android:icon="@drawable/ic_shortcut_routes"
-        android:shortcutShortLabel="@string/shortcut_routes_short"
-        android:shortcutLongLabel="@string/shortcut_routes_long">
+        android:icon="@drawable/ic_shortcut_settings"
+        android:shortcutShortLabel="@string/shortcut_settings_short"
+        android:shortcutLongLabel="@string/shortcut_settings_long">
         <intent
-            android:action="com.neo.ezaccounting.action.ROUTES"
-            android:targetPackage="com.neo.ezaccounting"
-            android:targetClass="com.neo.ezaccounting.UnifiedMainActivity" />
-    </shortcut>
-    <shortcut
-        android:shortcutId="security"
-        android:enabled="true"
-        android:icon="@drawable/ic_shortcut_security"
-        android:shortcutShortLabel="@string/shortcut_security_short"
-        android:shortcutLongLabel="@string/shortcut_security_long">
-        <intent
-            android:action="com.neo.ezaccounting.action.SECURITY"
-            android:targetPackage="com.neo.ezaccounting"
-            android:targetClass="com.neo.ezaccounting.UnifiedMainActivity" />
-    </shortcut>
-    <shortcut
-        android:shortcutId="lock"
-        android:enabled="true"
-        android:icon="@drawable/ic_launcher"
-        android:shortcutShortLabel="@string/shortcut_lock_short"
-        android:shortcutLongLabel="@string/shortcut_lock_long">
-        <intent
-            android:action="com.neo.ezaccounting.action.LOCK"
-            android:targetPackage="com.neo.ezaccounting"
-            android:targetClass="com.neo.ezaccounting.UnifiedMainActivity" />
-    </shortcut>
-    <shortcut
-        android:shortcutId="quick_actions"
-        android:enabled="true"
-        android:icon="@drawable/ic_launcher"
-        android:shortcutShortLabel="@string/shortcut_quick_actions_short"
-        android:shortcutLongLabel="@string/shortcut_quick_actions_long">
-        <intent
-            android:action="com.neo.ezaccounting.action.TOGGLE_QUICK_ACTIONS"
+            android:action="com.neo.ezaccounting.action.SETTINGS"
             android:targetPackage="com.neo.ezaccounting"
             android:targetClass="com.neo.ezaccounting.UnifiedMainActivity" />
     </shortcut>

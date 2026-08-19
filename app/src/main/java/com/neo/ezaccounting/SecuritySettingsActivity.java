@@ -2,12 +2,15 @@ package com.neo.ezaccounting;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.os.Bundle;
 import android.text.InputFilter;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
@@ -28,8 +31,9 @@ import java.util.concurrent.Executors;
 public class SecuritySettingsActivity extends FragmentActivity {
     private final ExecutorService securityExecutor = Executors.newSingleThreadExecutor();
     private TextView currentMode;
-    private Button relockButton;
-    private Button screenOffButton;
+    private TextView relockButton;
+    private TextView screenOffButton;
+    private TextView preloadButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -41,10 +45,13 @@ public class SecuritySettingsActivity extends FragmentActivity {
     private void showSettings() {
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
+        scrollView.setClipToPadding(false);
         scrollView.setBackgroundColor(UiTheme.background(this));
+        scrollView.setPadding(0, 0, 0, dp(24));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
         root.setPadding(dp(UiComponents.PAGE_HORIZONTAL_DP), dp(UiComponents.PAGE_TOP_DP),
                 dp(UiComponents.PAGE_HORIZONTAL_DP), dp(UiComponents.PAGE_BOTTOM_DP));
         scrollView.addView(root, new ScrollView.LayoutParams(
@@ -67,50 +74,61 @@ public class SecuritySettingsActivity extends FragmentActivity {
         close.setContentDescription("返回设置中心");
         close.setOnClickListener(view -> finish());
         header.addView(close, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        root.addView(header, fullWrap(dp(8)));
+        root.addView(header, fullWrap(dp(10)));
 
         TextView description = new TextView(this);
-        description.setText("管理进入应用时的身份验证与自动锁定策略。");
+        description.setText("管理进入拾账时的身份验证、自动锁定与安全预加载策略。");
         description.setTextSize(14.5f);
         description.setTextColor(UiTheme.secondaryText(this));
-        description.setLineSpacing(0, 1.15f);
-        root.addView(description, fullWrap(dp(18)));
+        description.setLineSpacing(0, 1.18f);
+        root.addView(description, fullWrap(dp(24)));
 
         currentMode = new TextView(this);
         currentMode.setTextSize(15);
         currentMode.setTextColor(UiTheme.primaryText(this));
-        currentMode.setTypeface(null, android.graphics.Typeface.BOLD);
+        currentMode.setLineSpacing(0, 1.18f);
         currentMode.setPadding(dp(16), dp(14), dp(16), dp(14));
-        currentMode.setBackground(surfaceCard(16));
+        currentMode.setBackground(outlinedSurface());
+        currentMode.setContentDescription("当前安全状态");
         root.addView(currentMode, fullWrap(dp(24)));
 
         TextView policyTitle = sectionTitle("锁定策略");
-        root.addView(policyTitle, fullWrap(dp(10)));
+        root.addView(policyTitle, fullWrap(dp(8)));
 
-        relockButton = optionButton("自动锁定时间", "设置 App 切到后台后多长时间重新验证");
-        root.addView(relockButton, fullWrap(dp(12)));
+        LinearLayout policyCard = settingsCard();
+        relockButton = optionRow("自动锁定时间", "设置 App 切到后台后多长时间重新验证");
+        policyCard.addView(relockButton, rowParams());
         relockButton.setOnClickListener(v -> chooseRelockTimeout());
-
-        screenOffButton = optionButton("熄屏后立即锁定", "手机变为非交互状态后，下次进入立即验证");
-        root.addView(screenOffButton, fullWrap(dp(20)));
+        addDivider(policyCard);
+        screenOffButton = optionRow("熄屏后立即锁定", "手机变为非交互状态后，下次进入立即验证");
+        policyCard.addView(screenOffButton, rowParams());
         screenOffButton.setOnClickListener(v -> toggleScreenOffLock());
+        addDivider(policyCard);
+        preloadButton = optionRow("解锁时预加载首页", "验证期间安全加载首页，加快解锁后的显示");
+        policyCard.addView(preloadButton, rowParams());
+        preloadButton.setOnClickListener(v -> toggleUnlockPreload());
+        root.addView(policyCard, fullWrap(dp(24)));
 
         TextView methodTitle = sectionTitle("验证方式");
-        root.addView(methodTitle, fullWrap(dp(10)));
+        root.addView(methodTitle, fullWrap(dp(8)));
 
-        Button biometric = optionButton("指纹或面容", "调用 Android 系统生物识别，不保存生物特征数据");
-        root.addView(biometric, fullWrap(dp(12)));
+        LinearLayout methodCard = settingsCard();
+        TextView biometric = optionRow("指纹或面容", "调用 Android 系统生物识别，不保存生物特征数据");
+        methodCard.addView(biometric, rowParams());
         biometric.setOnClickListener(v -> configureBiometric());
-
-        Button pin = optionButton("四位数字密码", "设置四位数字，密码只以加盐哈希形式保存在本机");
-        root.addView(pin, fullWrap(dp(12)));
+        addDivider(methodCard);
+        TextView pin = optionRow("四位数字密码", "密码仅以加盐哈希形式保存在本机");
+        methodCard.addView(pin, rowParams());
         pin.setOnClickListener(v -> configurePin());
-
-        Button pattern = optionButton("九宫格图形锁", "至少连接四个点，需要连续绘制两次确认");
-        root.addView(pattern, fullWrap(dp(12)));
+        addDivider(methodCard);
+        TextView pattern = optionRow("九宫格图形锁", "至少连接四个点，需要连续绘制两次确认");
+        methodCard.addView(pattern, rowParams());
         pattern.setOnClickListener(v -> configurePattern());
+        root.addView(methodCard, fullWrap(dp(18)));
 
-        Button disable = optionButton("关闭安全验证", "进入应用时不再要求验证");
+        Button disable = new Button(this);
+        disable.setText("关闭安全验证");
+        UiComponents.styleDangerAction(disable);
         root.addView(disable, fullWrap(dp(18)));
         disable.setOnClickListener(v -> confirmDisable());
 
@@ -118,7 +136,8 @@ public class SecuritySettingsActivity extends FragmentActivity {
         note.setText("提示：连续输错 PIN 或图形后会进入递增等待时间。若选择生物识别，请确保系统中已录入指纹或面容。");
         note.setTextSize(12.5f);
         note.setTextColor(UiTheme.tertiaryText(this));
-        note.setLineSpacing(0, 1.12f);
+        note.setGravity(Gravity.CENTER);
+        note.setLineSpacing(0, 1.15f);
         root.addView(note, fullWrap(0));
 
         refreshSummary();
@@ -128,27 +147,58 @@ public class SecuritySettingsActivity extends FragmentActivity {
     private TextView sectionTitle(String text) {
         TextView title = new TextView(this);
         title.setText(text);
-        title.setTextSize(17);
+        title.setTextSize(14.5f);
         title.setTextColor(UiTheme.primaryText(this));
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         return title;
     }
 
-    private Button optionButton(String title, String subtitle) {
-        Button button = new Button(this);
-        button.setAllCaps(false);
-        button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        button.setText(title + "\n" + subtitle);
-        button.setTextSize(15);
-        button.setTextColor(UiTheme.primaryText(this));
-        button.setPadding(dp(16), dp(12), dp(16), dp(12));
-        button.setBackground(surfaceCard(16));
-        button.setMinHeight(dp(64));
-        return button;
+    private LinearLayout settingsCard() {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(outlinedSurface());
+        card.setClipToOutline(true);
+        return card;
     }
 
-    private GradientDrawable surfaceCard(int radiusDp) {
-        return UiComponents.surface(this);
+    private TextView optionRow(String title, String subtitle) {
+        TextView row = new TextView(this);
+        row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        row.setText(title + "\n" + subtitle);
+        row.setTextSize(15);
+        row.setTextColor(UiTheme.primaryText(this));
+        row.setLineSpacing(0, 1.12f);
+        row.setPadding(dp(16), dp(10), dp(16), dp(10));
+        row.setMinHeight(dp(68));
+        row.setClickable(true);
+        row.setFocusable(true);
+        GradientDrawable transparent = new GradientDrawable();
+        transparent.setColor(Color.TRANSPARENT);
+        row.setBackground(new RippleDrawable(ColorStateList.valueOf(Color.argb(
+                UiTheme.isDark(this) ? 64 : 40, 23, 107, 91)), transparent, null));
+        return row;
+    }
+
+    private LinearLayout.LayoutParams rowParams() {
+        return new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+    }
+
+    private void addDivider(LinearLayout card) {
+        View divider = new View(this);
+        divider.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        divider.setBackgroundColor(UiTheme.border(this));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+        params.leftMargin = dp(16);
+        params.rightMargin = dp(16);
+        card.addView(divider, params);
+    }
+
+    private GradientDrawable outlinedSurface() {
+        GradientDrawable drawable = UiComponents.surface(this);
+        drawable.setStroke(dp(1), UiTheme.border(this));
+        return drawable;
     }
 
     private void chooseRelockTimeout() {
@@ -370,10 +420,19 @@ public class SecuritySettingsActivity extends FragmentActivity {
         Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
     }
 
+    private void toggleUnlockPreload() {
+        boolean enabled = !AppSecurity.isPreloadWhileLocked(this);
+        AppSecurity.setPreloadWhileLocked(this, enabled);
+        policyChanged(enabled ? "已开启解锁时预加载" : "已关闭解锁时预加载");
+    }
+
     private void refreshSummary() {
-        currentMode.setText("当前方式：" + AppSecurity.getModeLabel(this) +
+        String summary = "当前方式：" + AppSecurity.getModeLabel(this) +
                 "\n自动锁定：" + AppSecurity.getRelockTimeoutLabel(this) +
-                "\n熄屏锁定：" + (AppSecurity.isLockOnScreenOff(this) ? "开启" : "关闭"));
+                "\n熄屏锁定：" + (AppSecurity.isLockOnScreenOff(this) ? "开启" : "关闭") +
+                "\n解锁预加载：" + (AppSecurity.isPreloadWhileLocked(this) ? "开启" : "关闭");
+        currentMode.setText(summary);
+        currentMode.setContentDescription("当前安全状态。" + summary.replace('\n', '。'));
         if (relockButton != null) {
             relockButton.setText("自动锁定时间：" + AppSecurity.getRelockTimeoutLabel(this) +
                     "\n设置 App 切到后台后多长时间重新验证");
@@ -382,6 +441,11 @@ public class SecuritySettingsActivity extends FragmentActivity {
             screenOffButton.setText("熄屏后立即锁定：" +
                     (AppSecurity.isLockOnScreenOff(this) ? "开启" : "关闭") +
                     "\n手机变为非交互状态后，下次进入立即验证");
+        }
+        if (preloadButton != null) {
+            preloadButton.setText("解锁时预加载首页：" +
+                    (AppSecurity.isPreloadWhileLocked(this) ? "开启" : "关闭") +
+                    "\n验证期间安全加载首页，加快解锁后的显示");
         }
     }
 
