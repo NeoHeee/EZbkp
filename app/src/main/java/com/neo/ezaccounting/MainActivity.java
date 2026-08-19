@@ -17,6 +17,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -58,6 +59,8 @@ public class MainActivity extends FragmentActivity implements
     private static final long QUICK_ACTIONS_PREWARM_DELAY_MS = 400L;
     private static final long UNLOCK_PRELOAD_DELAY_MS = 200L;
     private static final long UNLOCK_PRELOAD_TIMEOUT_MS = 8000L;
+    private static final long UNLOCK_TRANSITION_MAX_MS = 800L;
+    private static final String PERFORMANCE_TAG = "LedgerlyStartup";
 
     private SharedPreferences preferences;
     private String localUrl;
@@ -84,6 +87,11 @@ public class MainActivity extends FragmentActivity implements
     private Runnable pendingWifiPermissionRefresh;
     private boolean unlockPreloadActive;
     private boolean unlockPreloadFailed;
+    private String unlockPreloadLocalUrl = "";
+    private long unlockRequestedAt;
+    private long unlockVerifiedAt;
+    private View unlockTransitionCover;
+    private final ConnectionPrewarmer connectionPrewarmer = new ConnectionPrewarmer();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private AppStateMachine stateMachine;
@@ -110,6 +118,7 @@ public class MainActivity extends FragmentActivity implements
         unlockPreloadFailed = true;
         webViewController.stopLoading();
     };
+    private final Runnable unlockTransitionTimeout = this::hideUnlockTransitionCover;
 
     private ValueCallback<Uri[]> filePathCallback;
     private Uri pendingCameraUri;
@@ -482,11 +491,23 @@ public class MainActivity extends FragmentActivity implements
 
     private void beginProtectedUnlockWindow() {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-        if (webLayer != null) webLayer.setVisibility(View.INVISIBLE);
+        unlockRequestedAt = android.os.SystemClock.elapsedRealtime();
+        if (webLayer != null) {
+            webLayer.setVisibility(View.VISIBLE);
+            webLayer.setAlpha(0f);
+        }
         if (quickActionsButton != null) quickActionsButton.setVisibility(View.GONE);
         if (!lifecycleCoordinator.isInitialized() &&
                 AppSecurity.isPreloadWhileLocked(this) &&
                 routeCoordinator.hasConfiguredRoute()) {
+            String ssid = WifiRouteContext.currentSsid(this);
+            boolean wifiConnected = WifiRouteContext.isWifiConnected(this);
+            unlockPreloadLocalUrl = LocalRouteRules.selectExactWifiMatch(
+                    localRouteRules, ssid, wifiConnected);
+            if (unlockPreloadLocalUrl.isEmpty() && publicUrl != null &&
+                    !publicUrl.trim().isEmpty()) {
+                connectionPrewarmer.prewarm(publicUrl);
+            }
             mainHandler.removeCallbacks(unlockPreload);
             mainHandler.postDelayed(unlockPreload, UNLOCK_PRELOAD_DELAY_MS);
         }
@@ -495,14 +516,10 @@ public class MainActivity extends FragmentActivity implements
     private void startUnlockPreload() {
         if (!lifecycleCoordinator.isAuthInProgress() || lifecycleCoordinator.isInitialized() ||
                 isFinishing() || isDestroyed()) return;
-        String ssid = WifiRouteContext.currentSsid(this);
-        boolean wifiConnected = WifiRouteContext.isWifiConnected(this);
-        String exactLocalUrl = LocalRouteRules.selectExactWifiMatch(
-                localRouteRules, ssid, wifiConnected);
         unlockPreloadActive = true;
         unlockPreloadFailed = false;
         webViewController.setPreloadMode(true);
-        if (!routeCoordinator.activateFastStartRoute(exactLocalUrl)) {
+        if (!routeCoordinator.activateFastStartRoute(unlockPreloadLocalUrl)) {
             unlockPreloadActive = false;
             webViewController.setPreloadMode(false);
             return;
@@ -513,8 +530,20 @@ public class MainActivity extends FragmentActivity implements
     private void finishProtectedUnlockWindow(boolean success) {
         mainHandler.removeCallbacks(unlockPreload);
         mainHandler.removeCallbacks(unlockPreloadTimeout);
+        unlockVerifiedAt = android.os.SystemClock.elapsedRealtime();
+        Log.i(PERFORMANCE_TAG, "auth_ms=" + Math.max(0L,
+                unlockVerifiedAt - unlockRequestedAt) +
+                " success=" + success +
+                " content_ready=" + (webViewController != null &&
+                webViewController.isContentReady()));
         if (success) {
-            if (webLayer != null) webLayer.setVisibility(View.VISIBLE);
+            boolean waitForContent = unlockPreloadActive && webViewController != null &&
+                    webViewController.isCreated() && !webViewController.isContentReady();
+            if (waitForContent) showUnlockTransitionCover();
+            if (webLayer != null) {
+                webLayer.setVisibility(View.VISIBLE);
+                webLayer.setAlpha(1f);
+            }
             if (webViewController != null) webViewController.setPreloadMode(false);
         } else if (unlockPreloadActive && webViewController != null) {
             webViewController.stopLoading();
@@ -523,6 +552,47 @@ public class MainActivity extends FragmentActivity implements
         }
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         unlockPreloadActive = false;
+    }
+
+    private void showUnlockTransitionCover() {
+        hideUnlockTransitionCover();
+        FrameLayout cover = new FrameLayout(this);
+        cover.setBackgroundColor(UiTheme.webBackground(this));
+        cover.setClickable(true);
+        cover.setFocusable(true);
+        cover.setContentDescription("正在准备首页内容");
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setGravity(Gravity.CENTER);
+        ProgressBar progress = new ProgressBar(this);
+        progress.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(
+                UiTheme.accent(this)));
+        content.addView(progress, new LinearLayout.LayoutParams(dp(36), dp(36)));
+        TextView message = new TextView(this);
+        message.setText("正在准备首页…");
+        message.setTextSize(14);
+        message.setTextColor(UiTheme.secondaryText(this));
+        message.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams messageParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        messageParams.topMargin = dp(14);
+        content.addView(message, messageParams);
+        cover.addView(content, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        appRoot.addView(cover, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        cover.bringToFront();
+        unlockTransitionCover = cover;
+        mainHandler.postDelayed(unlockTransitionTimeout, UNLOCK_TRANSITION_MAX_MS);
+    }
+
+    private void hideUnlockTransitionCover() {
+        mainHandler.removeCallbacks(unlockTransitionTimeout);
+        if (unlockTransitionCover == null) return;
+        appRoot.removeView(unlockTransitionCover);
+        unlockTransitionCover = null;
+        updateQuickActionsVisibility();
     }
 
     private void showServerSettings() {
@@ -870,6 +940,18 @@ public class MainActivity extends FragmentActivity implements
         View decor = getWindow().getDecorView();
         decor.removeCallbacks(quickActionsPrewarm);
         decor.postDelayed(quickActionsPrewarm, QUICK_ACTIONS_PREWARM_DELAY_MS);
+    }
+
+    @Override
+    public void onPageContentReady(String url, long htmlReadyMs, long contentReadyMs,
+                                   boolean timedOut) {
+        Log.i(PERFORMANCE_TAG, "route=" +
+                RoutePresentation.routeName(routeCoordinator.getActiveType()) +
+                " html_ms=" + htmlReadyMs +
+                " content_ms=" + contentReadyMs +
+                " timed_out=" + timedOut +
+                " during_auth=" + lifecycleCoordinator.isAuthInProgress());
+        hideUnlockTransitionCover();
     }
 
     @Override
@@ -1356,6 +1438,7 @@ public class MainActivity extends FragmentActivity implements
     @Override
     protected void onDestroy() {
         mainHandler.removeCallbacksAndMessages(null);
+        connectionPrewarmer.shutdown();
         getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
         getWindow().getDecorView().removeCallbacks(progressivePageRetry);
         getWindow().getDecorView().removeCallbacks(quickActionsPrewarm);
