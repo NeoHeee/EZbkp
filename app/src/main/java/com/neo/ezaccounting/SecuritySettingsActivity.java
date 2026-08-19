@@ -3,9 +3,7 @@ package com.neo.ezaccounting;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.res.ColorStateList;
-import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.RippleDrawable;
 import android.os.Bundle;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -16,6 +14,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -31,9 +30,9 @@ import java.util.concurrent.Executors;
 public class SecuritySettingsActivity extends FragmentActivity {
     private final ExecutorService securityExecutor = Executors.newSingleThreadExecutor();
     private TextView currentMode;
-    private TextView relockButton;
-    private TextView screenOffButton;
-    private TextView preloadButton;
+    private Button relockButton;
+    private Switch screenOffSwitch;
+    private Switch preloadSwitch;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -95,36 +94,48 @@ public class SecuritySettingsActivity extends FragmentActivity {
         TextView policyTitle = sectionTitle("锁定策略");
         root.addView(policyTitle, fullWrap(dp(8)));
 
-        LinearLayout policyCard = settingsCard();
-        relockButton = optionRow("自动锁定时间", "设置 App 切到后台后多长时间重新验证");
-        policyCard.addView(relockButton, rowParams());
+        relockButton = actionButton("自动锁定时间");
+        root.addView(relockButton, fullWrap(dp(8)));
         relockButton.setOnClickListener(v -> chooseRelockTimeout());
+        root.addView(actionDescription("设置 App 切到后台后多长时间重新验证"),
+                fullWrap(dp(14)));
+
+        LinearLayout policyCard = settingsCard();
+        screenOffSwitch = settingSwitch("熄屏后立即锁定");
+        View screenOffRow = switchRow("熄屏后立即锁定",
+                "手机变为非交互状态后，下次进入立即验证", screenOffSwitch);
+        policyCard.addView(screenOffRow, rowParams());
+        screenOffRow.setOnClickListener(v -> screenOffSwitch.performClick());
+        screenOffSwitch.setOnClickListener(v -> toggleScreenOffLock());
         addDivider(policyCard);
-        screenOffButton = optionRow("熄屏后立即锁定", "手机变为非交互状态后，下次进入立即验证");
-        policyCard.addView(screenOffButton, rowParams());
-        screenOffButton.setOnClickListener(v -> toggleScreenOffLock());
-        addDivider(policyCard);
-        preloadButton = optionRow("解锁时预加载首页", "验证期间安全加载首页，加快解锁后的显示");
-        policyCard.addView(preloadButton, rowParams());
-        preloadButton.setOnClickListener(v -> toggleUnlockPreload());
+        preloadSwitch = settingSwitch("解锁时预加载首页");
+        View preloadRow = switchRow("解锁时预加载首页",
+                "验证期间安全加载首页，加快解锁后的显示", preloadSwitch);
+        policyCard.addView(preloadRow, rowParams());
+        preloadRow.setOnClickListener(v -> preloadSwitch.performClick());
+        preloadSwitch.setOnClickListener(v -> toggleUnlockPreload());
         root.addView(policyCard, fullWrap(dp(24)));
 
         TextView methodTitle = sectionTitle("验证方式");
         root.addView(methodTitle, fullWrap(dp(8)));
 
-        LinearLayout methodCard = settingsCard();
-        TextView biometric = optionRow("指纹或面容", "调用 Android 系统生物识别，不保存生物特征数据");
-        methodCard.addView(biometric, rowParams());
+        Button biometric = actionButton("指纹或面容");
+        root.addView(biometric, fullWrap(dp(6)));
         biometric.setOnClickListener(v -> configureBiometric());
-        addDivider(methodCard);
-        TextView pin = optionRow("四位数字密码", "密码仅以加盐哈希形式保存在本机");
-        methodCard.addView(pin, rowParams());
+        root.addView(actionDescription("调用 Android 系统生物识别，不保存生物特征数据"),
+                fullWrap(dp(12)));
+
+        Button pin = actionButton("四位数字密码");
+        root.addView(pin, fullWrap(dp(6)));
         pin.setOnClickListener(v -> configurePin());
-        addDivider(methodCard);
-        TextView pattern = optionRow("九宫格图形锁", "至少连接四个点，需要连续绘制两次确认");
-        methodCard.addView(pattern, rowParams());
+        root.addView(actionDescription("密码仅以加盐哈希形式保存在本机"),
+                fullWrap(dp(12)));
+
+        Button pattern = actionButton("九宫格图形锁");
+        root.addView(pattern, fullWrap(dp(6)));
         pattern.setOnClickListener(v -> configurePattern());
-        root.addView(methodCard, fullWrap(dp(18)));
+        root.addView(actionDescription("至少连接四个点，需要连续绘制两次确认"),
+                fullWrap(dp(18)));
 
         Button disable = new Button(this);
         disable.setText("关闭安全验证");
@@ -161,21 +172,65 @@ public class SecuritySettingsActivity extends FragmentActivity {
         return card;
     }
 
-    private TextView optionRow(String title, String subtitle) {
-        TextView row = new TextView(this);
-        row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        row.setText(title + "\n" + subtitle);
-        row.setTextSize(15);
-        row.setTextColor(UiTheme.primaryText(this));
-        row.setLineSpacing(0, 1.12f);
-        row.setPadding(dp(16), dp(10), dp(16), dp(10));
-        row.setMinHeight(dp(68));
+    private Button actionButton(String title) {
+        Button button = new Button(this);
+        button.setText(title);
+        UiComponents.styleAccentAction(button);
+        button.setTextSize(15);
+        return button;
+    }
+
+    private TextView actionDescription(String text) {
+        TextView description = new TextView(this);
+        description.setText(text);
+        description.setTextSize(13);
+        description.setTextColor(UiTheme.secondaryText(this));
+        description.setPadding(dp(4), 0, dp(4), 0);
+        return description;
+    }
+
+    private Switch settingSwitch(String title) {
+        Switch toggle = new Switch(this);
+        toggle.setShowText(false);
+        toggle.setMinWidth(dp(52));
+        toggle.setMinHeight(dp(48));
+        toggle.setContentDescription(title);
+        int[][] states = new int[][]{
+                new int[]{android.R.attr.state_checked}, new int[]{}
+        };
+        toggle.setTrackTintList(new ColorStateList(states, new int[]{
+                UiTheme.accent(this), UiTheme.border(this)
+        }));
+        toggle.setThumbTintList(new ColorStateList(states, new int[]{
+                UiTheme.surface(this), UiTheme.surface(this)
+        }));
+        return toggle;
+    }
+
+    private View switchRow(String title, String summary, Switch toggle) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(16), dp(8), dp(12), dp(8));
+        row.setMinimumHeight(dp(72));
         row.setClickable(true);
         row.setFocusable(true);
-        GradientDrawable transparent = new GradientDrawable();
-        transparent.setColor(Color.TRANSPARENT);
-        row.setBackground(new RippleDrawable(ColorStateList.valueOf(Color.argb(
-                UiTheme.isDark(this) ? 64 : 40, 23, 107, 91)), transparent, null));
+
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        TextView name = new TextView(this);
+        name.setText(title);
+        name.setTextSize(15);
+        name.setTextColor(UiTheme.primaryText(this));
+        labels.addView(name, rowParams());
+        TextView detail = new TextView(this);
+        detail.setText(summary);
+        detail.setTextSize(13);
+        detail.setTextColor(UiTheme.secondaryText(this));
+        labels.addView(detail, rowParams());
+        row.addView(labels, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(toggle, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return row;
     }
 
@@ -433,19 +488,19 @@ public class SecuritySettingsActivity extends FragmentActivity {
                 "\n解锁预加载：" + (AppSecurity.isPreloadWhileLocked(this) ? "开启" : "关闭");
         currentMode.setText(summary);
         currentMode.setContentDescription("当前安全状态。" + summary.replace('\n', '。'));
-        if (relockButton != null) {
-            relockButton.setText("自动锁定时间：" + AppSecurity.getRelockTimeoutLabel(this) +
-                    "\n设置 App 切到后台后多长时间重新验证");
+        if (relockButton != null) relockButton.setText(
+                "自动锁定时间 · " + AppSecurity.getRelockTimeoutLabel(this));
+        if (screenOffSwitch != null) {
+            boolean enabled = AppSecurity.isLockOnScreenOff(this);
+            screenOffSwitch.setChecked(enabled);
+            screenOffSwitch.setContentDescription("熄屏后立即锁定" +
+                    (enabled ? "已开启" : "已关闭"));
         }
-        if (screenOffButton != null) {
-            screenOffButton.setText("熄屏后立即锁定：" +
-                    (AppSecurity.isLockOnScreenOff(this) ? "开启" : "关闭") +
-                    "\n手机变为非交互状态后，下次进入立即验证");
-        }
-        if (preloadButton != null) {
-            preloadButton.setText("解锁时预加载首页：" +
-                    (AppSecurity.isPreloadWhileLocked(this) ? "开启" : "关闭") +
-                    "\n验证期间安全加载首页，加快解锁后的显示");
+        if (preloadSwitch != null) {
+            boolean enabled = AppSecurity.isPreloadWhileLocked(this);
+            preloadSwitch.setChecked(enabled);
+            preloadSwitch.setContentDescription("解锁时预加载首页" +
+                    (enabled ? "已开启" : "已关闭"));
         }
     }
 
