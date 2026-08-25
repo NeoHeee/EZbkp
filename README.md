@@ -64,13 +64,15 @@
 环境要求：Java 17、Android SDK 35、Gradle 8.9。
 
 ```bash
-gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:checkSizeBenchmarkApk
 ```
 
 仓库包含两条 GitHub Actions 工作流：
 
-- **Android CI**：在提交和 Pull Request 上运行单元测试并构建 Debug APK。
+- **Android CI**：在提交和 Pull Request 上运行单元测试、构建 Debug APK，并验证经过 R8 与资源裁剪后的 APK 体积没有异常增长。
 - **Signed Android Release**：手动触发或推送 `v*` 标签时，构建、校验证书并上传签名 Release APK 与 SHA-256 文件。
+
+体积基线由 `ledgerly.maxApkSizeBytes` 控制；当前上限为 2,300,000 字节，调整依赖或资源时应先核对实际 APK 构成再修改上限。
 
 正式签名所需的仓库 Secrets 和证书校验方式见 [SIGNING_SETUP.md](SIGNING_SETUP.md)。
 
@@ -79,7 +81,7 @@ gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
 - 中文名称：拾账
 - 英文名称：Ledgerly
 - 包名：`com.neo.ezaccounting`
-- 当前版本：`1.6.7`（versionCode 28）
+- 当前版本：`1.6.8`（versionCode 29）
 - 最低 Android：8.0（API 26）
 - 目标 Android：API 35
 - 许可证：MIT

@@ -1,0 +1,58 @@
+package com.neo.ezaccounting;
+
+import org.junit.Test;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+import static org.junit.Assert.assertTrue;
+
+public class CriticalFeatureWiringTest {
+    @Test
+    public void appLockActivitiesRemainRegisteredAndReachable() throws IOException {
+        String manifest = readProjectFile("src/main/AndroidManifest.xml");
+        String mainActivity = readProjectFile(
+                "src/main/java/com/neo/ezaccounting/MainActivity.java");
+
+        assertContains(manifest, "android:name=\".LockActivity\"");
+        assertContains(manifest, "android:name=\".SecuritySettingsActivity\"");
+        assertContains(mainActivity, "new Intent(this, LockActivity.class)");
+        assertContains(mainActivity,
+                "new Intent(this, SecuritySettingsActivity.class)");
+    }
+
+    @Test
+    public void uploadAndDownloadControllersRemainConnected() throws IOException {
+        String mainActivity = readProjectFile(
+                "src/main/java/com/neo/ezaccounting/MainActivity.java");
+
+        assertContains(mainActivity, "new DownloadController(this, this)");
+        assertContains(mainActivity, "FileChooserSupport.create(this, params)");
+        assertContains(mainActivity, "FileChooserSupport.parseResult(");
+    }
+
+    @Test
+    public void quickCenterAndAutomaticRoutingRemainConnected() throws IOException {
+        String mainActivity = readProjectFile(
+                "src/main/java/com/neo/ezaccounting/MainActivity.java");
+
+        assertContains(mainActivity, "QuickActionsSheet.prewarm(");
+        assertContains(mainActivity, "QuickActionsSheet.show(");
+        assertContains(mainActivity, "new RouteCoordinator(preferences, this)");
+        assertContains(mainActivity,
+                "RouteCoordinator.Trigger.NETWORK_CHANGE");
+    }
+
+    private static String readProjectFile(String relativePath) throws IOException {
+        Path path = Paths.get(relativePath);
+        if (!Files.exists(path)) path = Paths.get("app").resolve(relativePath);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+    }
+
+    private static void assertContains(String source, String expected) {
+        assertTrue("缺少关键功能接线：" + expected, source.contains(expected));
+    }
+}
