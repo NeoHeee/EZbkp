@@ -31,6 +31,8 @@ public final class RoutePresentation {
             text.append("\n尚未完成测速");
             return text.toString();
         }
+        text.append("网络：").append(snapshot.networkLabel).append('\n');
+        text.append("选线原因：").append(snapshot.decisionReason).append('\n');
         text.append("\n本地：").append(probeLabel(snapshot.local()));
         text.append("\n公网：").append(probeLabel(snapshot.publicRoute()));
         text.append("\n\n自动规则：综合当前网络匹配、延迟和近期稳定性选择线路；网络变化后自动重新评估。");

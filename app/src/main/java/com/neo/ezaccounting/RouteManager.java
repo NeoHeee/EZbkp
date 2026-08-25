@@ -72,6 +72,10 @@ public final class RouteManager {
         public final boolean webVerified;
         public final int reliabilityPercent;
         public final boolean cached;
+        public final long dnsMs;
+        public final long tcpMs;
+        public final long tlsMs;
+        public final long httpMs;
 
         ProbeResult(String url, int type, boolean reachable, long latencyMs, int statusCode) {
             this(url, type, reachable, latencyMs, statusCode,
@@ -99,6 +103,17 @@ public final class RouteManager {
                             String finalUrl, int redirectCount, String resolvedAddresses,
                             boolean verificationPending, boolean webVerified,
                             int reliabilityPercent, boolean cached) {
+            this(url, type, reachable, latencyMs, statusCode, errorKind, errorMessage,
+                    finalUrl, redirectCount, resolvedAddresses, verificationPending,
+                    webVerified, reliabilityPercent, cached, -1L, -1L, -1L, -1L);
+        }
+
+        private ProbeResult(String url, int type, boolean reachable, long latencyMs,
+                            int statusCode, ErrorKind errorKind, String errorMessage,
+                            String finalUrl, int redirectCount, String resolvedAddresses,
+                            boolean verificationPending, boolean webVerified,
+                            int reliabilityPercent, boolean cached, long dnsMs, long tcpMs,
+                            long tlsMs, long httpMs) {
             this.url = url;
             this.type = type;
             this.reachable = reachable;
@@ -113,6 +128,10 @@ public final class RouteManager {
             this.webVerified = webVerified;
             this.reliabilityPercent = Math.max(0, Math.min(100, reliabilityPercent));
             this.cached = cached;
+            this.dnsMs = dnsMs;
+            this.tcpMs = tcpMs;
+            this.tlsMs = tlsMs;
+            this.httpMs = httpMs;
         }
 
         public boolean isConfigured() {
@@ -157,7 +176,7 @@ public final class RouteManager {
         ProbeResult asWebVerificationCandidate() {
             return new ProbeResult(url, type, true, latencyMs, statusCode,
                     errorKind, errorMessage, finalUrl, redirectCount, resolvedAddresses,
-                    true, false, reliabilityPercent, cached);
+                    true, false, reliabilityPercent, cached, dnsMs, tcpMs, tlsMs, httpMs);
         }
 
         ProbeResult asWebVerified(String actualUrl) {
@@ -165,13 +184,21 @@ public final class RouteManager {
                     errorKind, errorMessage,
                     actualUrl == null || actualUrl.trim().isEmpty() ? finalUrl : actualUrl,
                     redirectCount, resolvedAddresses, false, true,
-                    reliabilityPercent, cached);
+                    reliabilityPercent, cached, dnsMs, tcpMs, tlsMs, httpMs);
         }
 
         ProbeResult withHealth(int reliabilityPercent, boolean cached) {
             return new ProbeResult(url, type, reachable, latencyMs, statusCode,
                     errorKind, errorMessage, finalUrl, redirectCount, resolvedAddresses,
-                    verificationPending, webVerified, reliabilityPercent, cached);
+                    verificationPending, webVerified, reliabilityPercent, cached,
+                    dnsMs, tcpMs, tlsMs, httpMs);
+        }
+
+        ProbeResult withTimings(long dnsMs, long tcpMs, long tlsMs, long httpMs) {
+            return new ProbeResult(url, type, reachable, latencyMs, statusCode,
+                    errorKind, errorMessage, finalUrl, redirectCount, resolvedAddresses,
+                    verificationPending, webVerified, reliabilityPercent, cached,
+                    dnsMs, tcpMs, tlsMs, httpMs);
         }
 
         private String failureDetail() {
@@ -190,7 +217,17 @@ public final class RouteManager {
             if (!resolvedAddresses.isEmpty()) {
                 detail.append("；解析：").append(resolvedAddresses);
             }
+            if (dnsMs >= 0 || tcpMs >= 0 || tlsMs >= 0 || httpMs >= 0) {
+                detail.append("；分阶段：DNS ").append(phase(dnsMs));
+                detail.append("，TCP ").append(phase(tcpMs));
+                detail.append("，TLS ").append(phase(tlsMs));
+                detail.append("，HTTP ").append(phase(httpMs));
+            }
             return detail.toString();
+        }
+
+        private String phase(long value) {
+            return value < 0 ? "不适用" : value + " ms";
         }
 
         private static String errorLabel(ErrorKind kind) {
@@ -398,6 +435,10 @@ public final class RouteManager {
         int redirects = 0;
         Set<String> resolved = new LinkedHashSet<>();
         long startedAt = System.nanoTime();
+        long dnsMs = 0L;
+        long tcpMs = -1L;
+        long tlsMs = -1L;
+        long httpMs = -1L;
 
         try {
             while (true) {
@@ -408,7 +449,9 @@ public final class RouteManager {
                             "重定向到了不受支持的协议：" + scheme,
                             0, currentUrl, redirects, resolved);
                 }
+                long phaseStartedAt = System.nanoTime();
                 resolveAddresses(target, resolved, network);
+                dnsMs += elapsedMs(phaseStartedAt);
 
                 HttpURLConnection connection = null;
                 try {
@@ -424,8 +467,14 @@ public final class RouteManager {
                             "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8");
                     connection.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.7");
                     connection.setRequestProperty("Cache-Control", "no-cache");
+                    phaseStartedAt = System.nanoTime();
                     connection.connect();
+                    long secureConnectMs = elapsedMs(phaseStartedAt);
+                    if ("https".equalsIgnoreCase(scheme)) tlsMs = secureConnectMs;
+                    else tcpMs = secureConnectMs;
+                    phaseStartedAt = System.nanoTime();
                     int code = connection.getResponseCode();
+                    httpMs = elapsedMs(phaseStartedAt);
 
                     if (code >= 300 && code < 400) {
                         String location = connection.getHeaderField("Location");
@@ -446,7 +495,8 @@ public final class RouteManager {
                     return new ProbeResult(originalUrl, type, ok, latency, code,
                             ok ? ErrorKind.NONE : ErrorKind.HTTP,
                             ok ? null : "服务器返回 HTTP " + code,
-                            currentUrl, redirects, joinAddresses(resolved), false, false);
+                            currentUrl, redirects, joinAddresses(resolved), false, false)
+                            .withTimings(dnsMs, tcpMs, tlsMs, httpMs);
                 } finally {
                     if (connection != null) {
                         activeConnections.remove(connection);
@@ -456,22 +506,27 @@ public final class RouteManager {
             }
         } catch (SocketTimeoutException error) {
             return failure(originalUrl, type, startedAt, ErrorKind.TIMEOUT,
-                    "连接或读取超时", 0, currentUrl, redirects, resolved);
+                    "连接或读取超时", 0, currentUrl, redirects, resolved)
+                    .withTimings(dnsMs, tcpMs, tlsMs, httpMs);
         } catch (java.net.UnknownHostException error) {
             return failure(originalUrl, type, startedAt, ErrorKind.DNS,
                     "无法解析服务器地址：" + errorSummary(error),
-                    0, currentUrl, redirects, resolved);
+                    0, currentUrl, redirects, resolved)
+                    .withTimings(dnsMs, tcpMs, tlsMs, httpMs);
         } catch (SSLException error) {
             return failure(originalUrl, type, startedAt, ErrorKind.TLS,
                     "HTTPS握手失败：" + errorSummary(error),
-                    0, currentUrl, redirects, resolved);
+                    0, currentUrl, redirects, resolved)
+                    .withTimings(dnsMs, tcpMs, tlsMs, httpMs);
         } catch (ConnectException error) {
             return failure(originalUrl, type, startedAt, ErrorKind.CONNECTION,
                     "服务器拒绝连接：" + errorSummary(error),
-                    0, currentUrl, redirects, resolved);
+                    0, currentUrl, redirects, resolved)
+                    .withTimings(dnsMs, tcpMs, tlsMs, httpMs);
         } catch (Exception error) {
             return failure(originalUrl, type, startedAt, ErrorKind.UNKNOWN,
-                    errorSummary(error), 0, currentUrl, redirects, resolved);
+                    errorSummary(error), 0, currentUrl, redirects, resolved)
+                    .withTimings(dnsMs, tcpMs, tlsMs, httpMs);
         }
     }
 

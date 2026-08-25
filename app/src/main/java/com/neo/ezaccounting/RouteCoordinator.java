@@ -34,13 +34,22 @@ public final class RouteCoordinator {
         public final String activeUrl;
         public final int activeType;
         public final long checkedAt;
+        public final String networkLabel;
+        public final String decisionReason;
 
         Snapshot(RouteManager.Selection selection, String activeUrl, int activeType,
                  long checkedAt) {
+            this(selection, activeUrl, activeType, checkedAt, "未识别", "尚未评估");
+        }
+
+        Snapshot(RouteManager.Selection selection, String activeUrl, int activeType,
+                 long checkedAt, String networkLabel, String decisionReason) {
             this.selection = selection;
             this.activeUrl = activeUrl;
             this.activeType = activeType;
             this.checkedAt = checkedAt;
+            this.networkLabel = networkLabel;
+            this.decisionReason = decisionReason;
         }
 
         public RouteManager.ProbeResult local() {
@@ -72,9 +81,11 @@ public final class RouteCoordinator {
     private Trigger pendingTrigger;
     private Snapshot lastSnapshot;
     private String lastWebVerifiedUrl;
+    private String lastWebVerifiedNetworkKey;
     private long routeGeneration;
     private long checkSequence;
     private Network localNetwork;
+    private NetworkState networkState = NetworkState.none();
 
     public RouteCoordinator(SharedPreferences preferences, Host host) {
         this(preferences, host, new RouteManager(), new RouteSwitchPolicy());
@@ -153,6 +164,20 @@ public final class RouteCoordinator {
         }
     }
 
+    public void setNetworkState(NetworkState state) {
+        NetworkState next = state == null ? NetworkState.none() : state;
+        if (!next.equals(networkState)) routeGeneration++;
+        networkState = next;
+    }
+
+    public void cancelForNetworkChange() {
+        routeGeneration++;
+        checkSequence++;
+        checkInProgress = false;
+        pendingTrigger = null;
+        routeManager.cancelActiveProbes();
+    }
+
     public void testLocalAddress(String url, RouteManager.ProbeCallback callback) {
         routeManager.probeOnlyAsync(url, RouteManager.TYPE_LOCAL, localNetwork, callback);
     }
@@ -183,6 +208,7 @@ public final class RouteCoordinator {
         switchPolicy.recordSuccess(activeType);
         if (activeUrl == null || activeType == RouteManager.TYPE_NONE) return;
         lastWebVerifiedUrl = activeUrl;
+        lastWebVerifiedNetworkKey = networkState.key();
         preferences.edit().putString(KEY_LAST_ROUTE, activeUrl).apply();
         promoteActiveSnapshotToWebVerified();
     }
@@ -191,6 +217,7 @@ public final class RouteCoordinator {
         switchPolicy.recordFailure(activeType);
         if (activeUrl != null && activeUrl.equals(lastWebVerifiedUrl)) {
             lastWebVerifiedUrl = null;
+            lastWebVerifiedNetworkKey = null;
         }
         requestCheck(Trigger.PAGE_FAILURE);
     }
@@ -205,6 +232,19 @@ public final class RouteCoordinator {
                     System.currentTimeMillis());
             lastSnapshot = empty;
             host.onRouteUnavailable(empty, "尚未配置服务器地址", trigger);
+            return;
+        }
+
+        if (trigger == Trigger.NETWORK_CHANGE && activeUrl != null &&
+                activeUrl.equals(lastWebVerifiedUrl) &&
+                networkState.key().equals(lastWebVerifiedNetworkKey) &&
+                activeRouteEligible()) {
+            Snapshot stable = new Snapshot(lastSnapshot == null ? null : lastSnapshot.selection,
+                    activeUrl, activeType, System.currentTimeMillis(), networkState.label(),
+                    "当前线路已在此网络实际加载成功，无需重复测速");
+            lastSnapshot = stable;
+            host.onRouteSnapshot(stable, trigger);
+            host.onRouteStable(stable, stable.decisionReason, trigger);
             return;
         }
 
@@ -242,7 +282,7 @@ public final class RouteCoordinator {
 
             RouteManager.Selection selection = new RouteManager.Selection(selected, local, remote);
             Snapshot snapshot = new Snapshot(selection, activeUrl, activeType,
-                    System.currentTimeMillis());
+                    System.currentTimeMillis(), networkState.label(), "线路评估完成");
             lastSnapshot = snapshot;
             saveLatencies(snapshot);
             host.onRouteSnapshot(snapshot, trigger);
@@ -257,8 +297,13 @@ public final class RouteCoordinator {
                     activeUrl != null && activeUrl.equals(localUrl) :
                     activeType == RouteManager.TYPE_PUBLIC ?
                             activeUrl != null && activeUrl.equals(publicUrl) : true;
-            RouteSwitchPolicy.Decision decision = switchPolicy.evaluate(activeType,
-                    selection, snapshot.checkedAt, activeRouteEligible);
+            RouteSwitchPolicy.Decision decision = trigger == Trigger.PAGE_FAILURE ?
+                    switchPolicy.evaluateAfterPageFailure(activeType, selection,
+                            snapshot.checkedAt, activeRouteEligible) :
+                    switchPolicy.evaluate(activeType, selection,
+                            snapshot.checkedAt, activeRouteEligible);
+            snapshot = withReason(snapshot, decision.reason);
+            lastSnapshot = snapshot;
             if (decision.shouldSwitch && decision.target != null) {
                 activate(decision.target, snapshot, decision.reason, trigger);
             } else if (activeUrl != null && snapshot.activeReachable()) {
@@ -299,7 +344,8 @@ public final class RouteCoordinator {
         if (activeType == RouteManager.TYPE_PUBLIC) remote = active;
         RouteManager.Selection selection = new RouteManager.Selection(active, local, remote);
         lastSnapshot = new Snapshot(selection, activeUrl, activeType,
-                System.currentTimeMillis());
+                System.currentTimeMillis(), networkState.label(),
+                "WebView 已实际加载成功，保持当前线路");
     }
 
     private void activate(RouteManager.ProbeResult target, Snapshot snapshot, String reason,
@@ -316,7 +362,7 @@ public final class RouteCoordinator {
         }
         if (!target.verificationPending) switchPolicy.recordSuccess(activeType);
         Snapshot activated = new Snapshot(snapshot.selection, activeUrl,
-                activeType, snapshot.checkedAt);
+                activeType, snapshot.checkedAt, snapshot.networkLabel, reason);
         lastSnapshot = activated;
         host.onRouteActivated(target, activated, changed, reason, trigger);
     }
@@ -358,6 +404,22 @@ public final class RouteCoordinator {
 
     private String safe(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private boolean activeRouteEligible() {
+        if (activeType == RouteManager.TYPE_LOCAL) {
+            return activeUrl != null && activeUrl.equals(localUrl) && localNetwork != null;
+        }
+        if (activeType == RouteManager.TYPE_PUBLIC) {
+            return activeUrl != null && activeUrl.equals(publicUrl) &&
+                    networkState.type != NetworkState.Type.NONE;
+        }
+        return false;
+    }
+
+    private Snapshot withReason(Snapshot snapshot, String reason) {
+        return new Snapshot(snapshot.selection, snapshot.activeUrl, snapshot.activeType,
+                snapshot.checkedAt, snapshot.networkLabel, reason);
     }
 
     public void shutdown() {

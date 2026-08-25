@@ -227,7 +227,19 @@ public class MainActivity extends FragmentActivity implements
         routeCoordinator = new RouteCoordinator(preferences, this);
         routeCoordinator.setLocalNetwork(WifiRouteContext.currentWifiNetwork(this));
         routeCoordinator.setAddresses(localUrl, publicUrl);
-        networkMonitor = new NetworkMonitor(this, this::onDefaultNetworkChanged);
+        networkMonitor = new NetworkMonitor(this, new NetworkMonitor.Listener() {
+            @Override
+            public void onNetworkChanging() {
+                if (routeCoordinator != null) routeCoordinator.cancelForNetworkChange();
+                connectionPrewarmer.cancel();
+            }
+
+            @Override
+            public void onDefaultNetworkChanged(NetworkState state) {
+                MainActivity.this.onDefaultNetworkChanged(state);
+            }
+        });
+        routeCoordinator.setNetworkState(networkMonitor.currentState());
         registerScreenOffReceiver();
 
         handleLifecycleAction(lifecycleCoordinator.onCreate(AppSecurity.isEnabled(this)));
@@ -1199,11 +1211,16 @@ public class MainActivity extends FragmentActivity implements
         }
     }
 
-    private void onDefaultNetworkChanged() {
+    private void onDefaultNetworkChanged(NetworkState state) {
         refreshLocalRouteForNetwork();
+        routeCoordinator.setNetworkState(state);
         if (lifecycleCoordinator == null || !lifecycleCoordinator.isInitialized() ||
                 lifecycleCoordinator.isAuthInProgress() || !routeCoordinator.hasConfiguredRoute()) {
             return;
+        }
+        if (state.type != NetworkState.Type.NONE && publicUrl != null &&
+                !publicUrl.trim().isEmpty()) {
+            connectionPrewarmer.prewarm(publicUrl, state.key());
         }
         routeCoordinator.requestCheck(RouteCoordinator.Trigger.NETWORK_CHANGE);
     }

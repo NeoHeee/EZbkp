@@ -125,6 +125,8 @@ public final class ErrorRecoveryPage {
             return text.toString();
         }
         text.append("选择方式：自动管理\n");
+        text.append("当前网络：").append(snapshot.networkLabel).append('\n');
+        text.append("选线原因：").append(snapshot.decisionReason).append('\n');
         text.append("本地线路：").append(label(snapshot.local())).append('\n');
         text.append("公网线路：").append(label(snapshot.publicRoute()));
         return text.toString();

@@ -4,6 +4,7 @@ import android.os.SystemClock;
 import android.util.Log;
 
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
 import java.util.concurrent.ExecutorService;
@@ -17,11 +18,22 @@ public final class ConnectionPrewarmer {
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private Future<?> activeTask;
+    private String warmedKey;
+    private long warmedAt;
 
     public synchronized void prewarm(String address) {
-        if (activeTask != null) activeTask.cancel(true);
+        prewarm(address, "default");
+    }
+
+    public synchronized void prewarm(String address, String networkKey) {
         String target = origin(address);
         if (target == null) return;
+        String key = (networkKey == null ? "default" : networkKey) + "|" + target;
+        long now = System.currentTimeMillis();
+        if (key.equals(warmedKey) && now - warmedAt < 60_000L) return;
+        if (activeTask != null) activeTask.cancel(true);
+        warmedKey = key;
+        warmedAt = now;
         activeTask = executor.submit(() -> connect(target));
     }
 
@@ -29,8 +41,15 @@ public final class ConnectionPrewarmer {
         long startedAt = SystemClock.elapsedRealtime();
         HttpURLConnection connection = null;
         boolean success = false;
+        long dnsMs = -1L;
+        long connectMs = -1L;
+        long httpMs = -1L;
         try {
-            connection = (HttpURLConnection) new URL(target).openConnection();
+            URL url = new URL(target);
+            long phase = SystemClock.elapsedRealtime();
+            InetAddress.getAllByName(url.getHost());
+            dnsMs = SystemClock.elapsedRealtime() - phase;
+            connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("HEAD");
             connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
             connection.setReadTimeout(READ_TIMEOUT_MS);
@@ -39,15 +58,27 @@ public final class ConnectionPrewarmer {
             connection.setRequestProperty("Connection", "keep-alive");
             connection.setRequestProperty("User-Agent", "Ledgerly-Preconnect/" +
                     BuildConfig.VERSION_NAME);
+            phase = SystemClock.elapsedRealtime();
+            connection.connect();
+            connectMs = SystemClock.elapsedRealtime() - phase;
+            phase = SystemClock.elapsedRealtime();
             int status = connection.getResponseCode();
+            httpMs = SystemClock.elapsedRealtime() - phase;
             success = status > 0;
         } catch (Exception ignored) {
         } finally {
             if (connection != null) connection.disconnect();
             Log.i(TAG, "preconnect_ms=" +
                     (SystemClock.elapsedRealtime() - startedAt) +
-                    " success=" + success);
+                    " dns_ms=" + dnsMs +
+                    " tls_connect_ms=" + connectMs +
+                    " http_ms=" + httpMs + " success=" + success);
         }
+    }
+
+    public synchronized void cancel() {
+        if (activeTask != null) activeTask.cancel(true);
+        activeTask = null;
     }
 
     static String origin(String address) {
@@ -67,7 +98,7 @@ public final class ConnectionPrewarmer {
     }
 
     public synchronized void shutdown() {
-        if (activeTask != null) activeTask.cancel(true);
+        cancel();
         executor.shutdownNow();
     }
 }
