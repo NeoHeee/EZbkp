@@ -61,6 +61,17 @@ public class CriticalFeatureWiringTest {
         assertContains(webViewController, "restorePagePosition(url)");
     }
 
+    @Test
+    public void routeDiagnosticsRemainCompactAndExpandable() throws IOException {
+        String routeStatus = readProjectFile(
+                "src/main/java/com/neo/ezaccounting/RouteStatusDialogPage.java");
+
+        assertContains(routeStatus, "details.setVisibility(View.GONE)");
+        assertContains(routeStatus, "查看详情");
+        assertContains(routeStatus, "outer.addView(buttons");
+        assertContains(routeStatus, "phases.addView(metricCell(activity, \"HTTP\"");
+    }
+
     private static String readProjectFile(String relativePath) throws IOException {
         Path path = Paths.get(relativePath);
         if (!Files.exists(path)) path = Paths.get("app").resolve(relativePath);
