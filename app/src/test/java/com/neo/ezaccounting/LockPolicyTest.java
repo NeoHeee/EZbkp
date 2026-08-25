@@ -35,4 +35,15 @@ public class LockPolicyTest {
         assertEquals(30_000L, LockPolicy.lockoutDelayForFailedAttempts(5));
         assertEquals(60_000L, LockPolicy.lockoutDelayForFailedAttempts(7));
     }
+
+    @Test
+    public void failedAttemptPromptExplainsNextWaitThreshold() {
+        assertEquals(1, LockPolicy.attemptsUntilNextDelay(2));
+        assertEquals(2, LockPolicy.attemptsUntilNextDelay(3));
+        assertEquals(0, LockPolicy.attemptsUntilNextDelay(7));
+        assertEquals("密码错误，已连续失败 2 次；再错 1 次将进入等待",
+                LockPolicy.failedAttemptMessage(false, 2));
+        assertEquals("图形错误，已连续失败 7 次",
+                LockPolicy.failedAttemptMessage(true, 7));
+    }
 }

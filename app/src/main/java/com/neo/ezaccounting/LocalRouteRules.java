@@ -18,8 +18,9 @@ public final class LocalRouteRules {
                 for (int index = 0; index < array.length(); index++) {
                     JSONObject item = array.optJSONObject(index);
                     if (item == null) continue;
-                    String url = item.optString("url", "").trim();
-                    if (!url.isEmpty()) {
+                    String url = ServerAddressValidator.normalizeLocal(
+                            item.optString("url", ""));
+                    if (url != null) {
                         rules.add(new LocalRouteRule(item.optString("name", ""),
                                 item.optString("ssid", ""), url));
                     }
@@ -28,8 +29,9 @@ public final class LocalRouteRules {
                 // Fall through to the legacy address so malformed preferences never strand users.
             }
         }
-        if (rules.isEmpty() && legacyLocalUrl != null && !legacyLocalUrl.trim().isEmpty()) {
-            rules.add(new LocalRouteRule("", legacyLocalUrl));
+        String safeLegacyUrl = ServerAddressValidator.normalizeLocal(legacyLocalUrl);
+        if (rules.isEmpty() && safeLegacyUrl != null) {
+            rules.add(new LocalRouteRule("", safeLegacyUrl));
         }
         return Collections.unmodifiableList(rules);
     }

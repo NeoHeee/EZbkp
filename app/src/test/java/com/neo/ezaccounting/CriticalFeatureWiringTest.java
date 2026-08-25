@@ -72,6 +72,23 @@ public class CriticalFeatureWiringTest {
         assertContains(routeStatus, "phases.addView(metricCell(activity, \"HTTP\"");
     }
 
+    @Test
+    public void privacyBoundariesRemainExplicit() throws IOException {
+        String manifest = readProjectFile("src/main/AndroidManifest.xml");
+        String webView = readProjectFile(
+                "src/main/java/com/neo/ezaccounting/WebViewController.java");
+        String mainActivity = readProjectFile(
+                "src/main/java/com/neo/ezaccounting/MainActivity.java");
+
+        assertContains(manifest, "android:allowBackup=\"false\"");
+        assertContains(manifest, "@xml/data_extraction_rules");
+        assertContains(webView, "setAcceptThirdPartyCookies(webView, false)");
+        assertContains(webView, "clearHttpAuthUsernamePassword()");
+        assertContains(webView, "clearSslPreferences()");
+        assertContains(mainActivity, "webViewController.setPreloadMode(true)");
+        assertContains(mainActivity, "protected void onPause()");
+    }
+
     private static String readProjectFile(String relativePath) throws IOException {
         Path path = Paths.get(relativePath);
         if (!Files.exists(path)) path = Paths.get("app").resolve(relativePath);

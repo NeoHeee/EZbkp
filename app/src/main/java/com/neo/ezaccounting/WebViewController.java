@@ -20,6 +20,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebViewDatabase;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 
@@ -135,6 +136,7 @@ public final class WebViewController {
         webView.setBackgroundColor(UiTheme.webBackground(activity));
         webView.setContentDescription("记账页面");
         webView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        applyInteractionState();
         root.addView(webView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         pageProgress = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
@@ -177,12 +179,7 @@ public final class WebViewController {
     public void setPreloadMode(boolean enabled) {
         preloadMode = enabled;
         if (webView == null) return;
-        webView.setEnabled(!enabled);
-        webView.setFocusable(!enabled);
-        webView.setFocusableInTouchMode(!enabled);
-        webView.setImportantForAccessibility(enabled ?
-                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS :
-                View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        applyInteractionState();
         if (!enabled && pageReady) {
             syncPageTheme();
             refreshPageIdentity();
@@ -369,15 +366,22 @@ public final class WebViewController {
         }
     }
 
-    public void clearSiteData() {
-        CookieManager.getInstance().removeAllCookies(null);
-        CookieManager.getInstance().flush();
+    public void clearSiteData(Runnable completion) {
         WebStorage.getInstance().deleteAllData();
+        WebViewDatabase database = WebViewDatabase.getInstance(activity);
+        database.clearHttpAuthUsernamePassword();
+        database.clearFormData();
         pagePositionCache.clear();
         if (webView != null) {
             webView.clearCache(true);
             webView.clearHistory();
+            webView.clearFormData();
+            webView.clearSslPreferences();
         }
+        CookieManager.getInstance().removeAllCookies(removed -> {
+            CookieManager.getInstance().flush();
+            if (completion != null) completion.run();
+        });
     }
 
     public String webViewPackageName() {
@@ -418,7 +422,7 @@ public final class WebViewController {
                 + " Ledgerly/" + BuildConfig.VERSION_NAME);
 
         CookieManager.getInstance().setAcceptCookie(true);
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -704,6 +708,16 @@ public final class WebViewController {
         for (ValueCallback<EzBookkeepingPageDetector.PageIdentity> callback : callbacks) {
             callback.onReceiveValue(identity);
         }
+    }
+
+    private void applyInteractionState() {
+        if (webView == null) return;
+        webView.setEnabled(!preloadMode);
+        webView.setFocusable(!preloadMode);
+        webView.setFocusableInTouchMode(!preloadMode);
+        webView.setImportantForAccessibility(preloadMode ?
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS :
+                View.IMPORTANT_FOR_ACCESSIBILITY_YES);
     }
 
     public void rememberPagePosition() {

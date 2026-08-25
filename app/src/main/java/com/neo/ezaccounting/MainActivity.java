@@ -227,7 +227,9 @@ public class MainActivity extends FragmentActivity implements
                 preferences.getString(KEY_LOCAL_ROUTE_RULES, ""), legacyLocalUrl);
         localUrl = LocalRouteRules.select(localRouteRules,
                 WifiRouteContext.currentSsid(this), WifiRouteContext.isWifiConnected(this));
-        publicUrl = preferences.getString(KEY_PUBLIC_URL, "");
+        String storedPublicUrl = preferences.getString(KEY_PUBLIC_URL, "");
+        String safePublicUrl = ServerAddressValidator.normalizePublic(storedPublicUrl);
+        publicUrl = safePublicUrl == null ? "" : safePublicUrl;
         quickActionsEnabled = preferences.getBoolean(KEY_SHOW_QUICK_ACTIONS, true);
         updateQuickActionsVisibility();
         pendingShortcutAction = ShortcutActions.read(getIntent());
@@ -538,6 +540,9 @@ public class MainActivity extends FragmentActivity implements
             webLayer.setVisibility(View.VISIBLE);
             webLayer.setAlpha(0f);
         }
+        if (webViewController != null && webViewController.isCreated()) {
+            webViewController.setPreloadMode(true);
+        }
         if (quickActionsButton != null) quickActionsButton.setVisibility(View.GONE);
         if (!lifecycleCoordinator.isInitialized() &&
                 AppSecurity.isPreloadWhileLocked(this) &&
@@ -597,7 +602,7 @@ public class MainActivity extends FragmentActivity implements
             webViewController.destroy();
             if (webLayer != null) webLayer.removeAllViews();
         }
-        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        if (success) getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         unlockPreloadActive = false;
     }
 
@@ -1184,15 +1189,17 @@ public class MainActivity extends FragmentActivity implements
 
     private void confirmClearSiteData() {
         UiComponents.show(new AlertDialog.Builder(this)
-                .setTitle("清除登录与缓存")
-                .setMessage("这会退出当前账号并清除网页缓存，但不会删除线路和安全验证配置。")
+                .setTitle("清除登录与网页数据")
+                .setMessage("将清除 Cookie、网站存储、表单、HTTP 认证、SSL 偏好、缓存和浏览历史，并退出当前账号。线路与应用锁配置会保留。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("清除", (dialog, which) -> {
-                    webViewController.clearSiteData();
-                    if (routeCoordinator.getActiveUrl() != null) {
-                        webViewController.loadUrl(routeCoordinator.getActiveUrl());
-                    }
-                    Toast.makeText(this, "已清除登录与缓存", Toast.LENGTH_SHORT).show();
+                    webViewController.clearSiteData(() -> {
+                        if (routeCoordinator.getActiveUrl() != null) {
+                            webViewController.loadUrl(routeCoordinator.getActiveUrl());
+                        }
+                        Toast.makeText(this, "已清除登录、Cookie 与网页数据",
+                                Toast.LENGTH_SHORT).show();
+                    });
                 })
                 .create());
     }
@@ -1454,6 +1461,17 @@ public class MainActivity extends FragmentActivity implements
         if (lifecycleCoordinator == null) return;
         handleLifecycleAction(lifecycleCoordinator.onResumed(System.currentTimeMillis(),
                 AppSecurity.isEnabled(this), AppSecurity.getRelockTimeoutMs(this)));
+        if (!lifecycleCoordinator.isAuthInProgress()) {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (AppSecurity.isEnabled(this)) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        }
+        super.onPause();
     }
 
     @Override
