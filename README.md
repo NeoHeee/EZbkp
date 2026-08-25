@@ -81,14 +81,14 @@ gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:checkSizeBench
 - 中文名称：拾账
 - 英文名称：Ledgerly
 - 包名：`com.neo.ezaccounting`
-- 当前版本：`1.7.0`（versionCode 31）
+- 当前版本：`1.7.1`（versionCode 32）
 - 最低 Android：8.0（API 26）
 - 目标 Android：API 35
 - 许可证：MIT
 
 ## 隐私与安全
 
-服务器地址、安全方式及 PIN/图形锁哈希仅保存在应用私有数据中。账户和账目数据直接在设备与用户配置的 ezBookkeeping 服务端之间传输，本客户端不提供中转服务。
+服务器地址、安全方式及 PIN/图形锁哈希仅保存在应用私有数据中，并明确排除在 Android 云备份和设备迁移之外。公网地址仅允许 HTTPS，明文 HTTP 仅用于用户配置的局域网规则。账户和账目数据直接在设备与用户配置的 ezBookkeeping 服务端之间传输，本客户端不提供中转服务。
 
 Release 构建使用固定签名证书；证书 SHA-256：
 
