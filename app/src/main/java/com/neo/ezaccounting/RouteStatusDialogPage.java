@@ -86,7 +86,7 @@ public final class RouteStatusDialogPage {
         buttons.setOrientation(LinearLayout.HORIZONTAL);
         Button dismiss = new Button(activity);
         dismiss.setText("关闭");
-        UiComponents.styleSecondary(dismiss);
+        UiComponents.styleGoldAction(dismiss);
         dismiss.setOnClickListener(view -> onClose.run());
         Button speed = new Button(activity);
         speed.setText("手动测速");
@@ -146,13 +146,133 @@ public final class RouteStatusDialogPage {
         top.addView(badge);
         card.addView(top, fullWrap(activity, 10));
 
-        TextView detail = text(activity,
-                result == null ? "尚未进行线路探测" : result.diagnostic(),
-                13, UiTheme.secondaryText(activity), false);
-        detail.setLineSpacing(0, 1.18f);
-        detail.setTextIsSelectable(true);
-        card.addView(detail, fullWrap(activity, 0));
+        if (result == null || !result.isConfigured()) {
+            TextView empty = text(activity,
+                    result == null ? "尚未进行线路探测" : "未配置地址",
+                    13, UiTheme.secondaryText(activity), false);
+            card.addView(empty, fullWrap(activity, 0));
+            return card;
+        }
+
+        String message = result.webVerified ? "WebView 已实际加载成功" :
+                result.verificationPending ? "独立探测未通过，等待网页实际验证" :
+                        result.reachable ? "服务器连接正常" :
+                                safe(result.errorMessage, "线路暂时不可用");
+        TextView outcome = text(activity, message, 13,
+                result.reachable ? UiTheme.accentDark(activity) :
+                        UiTheme.secondaryText(activity), false);
+        outcome.setLineSpacing(0, 1.15f);
+        card.addView(outcome, fullWrap(activity, 12));
+
+        LinearLayout resultRows = new LinearLayout(activity);
+        resultRows.setOrientation(LinearLayout.VERTICAL);
+        resultRows.setBackground(detailBackground(activity));
+        resultRows.addView(detailRow(activity, "HTTP 状态",
+                result.statusCode > 0 ? String.valueOf(result.statusCode) : "未返回"));
+        addCompactDivider(activity, resultRows);
+        resultRows.addView(detailRow(activity, "总耗时",
+                result.latencyMs > 0 ? result.latencyMs + " ms" : "未记录"));
+        card.addView(resultRows, fullWrap(activity, 12));
+
+        TextView phaseLabel = text(activity, "分阶段耗时", 12.5f,
+                UiTheme.secondaryText(activity), true);
+        card.addView(phaseLabel, fullWrap(activity, 7));
+        LinearLayout phaseTop = new LinearLayout(activity);
+        phaseTop.setOrientation(LinearLayout.HORIZONTAL);
+        phaseTop.addView(metricCell(activity, "DNS", result.dnsMs), metricParams(activity, true));
+        phaseTop.addView(metricCell(activity, "TCP", result.tcpMs), metricParams(activity, false));
+        card.addView(phaseTop, fullWrap(activity, 6));
+        LinearLayout phaseBottom = new LinearLayout(activity);
+        phaseBottom.setOrientation(LinearLayout.HORIZONTAL);
+        phaseBottom.addView(metricCell(activity, "TLS", result.tlsMs), metricParams(activity, true));
+        phaseBottom.addView(metricCell(activity, "HTTP", result.httpMs), metricParams(activity, false));
+        card.addView(phaseBottom, fullWrap(activity, 12));
+
+        if (!result.resolvedAddresses.isEmpty()) {
+            TextView addressLabel = text(activity, "解析地址", 12.5f,
+                    UiTheme.secondaryText(activity), true);
+            card.addView(addressLabel, fullWrap(activity, 6));
+            TextView addresses = text(activity,
+                    result.resolvedAddresses.replace(", ", "\n"), 11.5f,
+                    UiTheme.secondaryText(activity), false);
+            addresses.setTypeface(Typeface.MONOSPACE);
+            addresses.setLineSpacing(dp(activity, 2), 1f);
+            addresses.setTextIsSelectable(true);
+            addresses.setPadding(dp(activity, 12), dp(activity, 10),
+                    dp(activity, 12), dp(activity, 10));
+            addresses.setBackground(detailBackground(activity));
+            card.addView(addresses, fullWrap(activity, 10));
+        }
+
+        if (result.redirectCount > 0 ||
+                (result.finalUrl != null && result.url != null &&
+                        !result.finalUrl.equals(result.url))) {
+            TextView redirect = text(activity,
+                    "重定向 " + result.redirectCount + " 次" +
+                            (result.finalUrl == null ? "" : "\n最终地址：" + result.finalUrl),
+                    12, UiTheme.tertiaryText(activity), false);
+            redirect.setTextIsSelectable(true);
+            redirect.setLineSpacing(0, 1.12f);
+            card.addView(redirect, fullWrap(activity, 0));
+        }
         return card;
+    }
+
+    private static View detailRow(Activity activity, String label, String value) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(activity, 12), dp(activity, 9),
+                dp(activity, 12), dp(activity, 9));
+        TextView name = text(activity, label, 12.5f,
+                UiTheme.secondaryText(activity), false);
+        row.addView(name, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView detail = text(activity, value, 13,
+                UiTheme.primaryText(activity), true);
+        detail.setGravity(Gravity.END);
+        row.addView(detail);
+        return row;
+    }
+
+    private static View metricCell(Activity activity, String label, long value) {
+        LinearLayout cell = new LinearLayout(activity);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setPadding(dp(activity, 12), dp(activity, 9),
+                dp(activity, 12), dp(activity, 9));
+        cell.setBackground(detailBackground(activity));
+        TextView name = text(activity, label, 11.5f,
+                UiTheme.tertiaryText(activity), false);
+        TextView timing = text(activity, value < 0 ? "不适用" : value + " ms",
+                13, UiTheme.primaryText(activity), true);
+        timing.setPadding(0, dp(activity, 3), 0, 0);
+        cell.addView(name);
+        cell.addView(timing);
+        return cell;
+    }
+
+    private static LinearLayout.LayoutParams metricParams(Activity activity, boolean left) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        if (left) params.rightMargin = dp(activity, 3);
+        else params.leftMargin = dp(activity, 3);
+        return params;
+    }
+
+    private static GradientDrawable detailBackground(Activity activity) {
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(UiTheme.softAccent(activity));
+        background.setCornerRadius(dp(activity, 11));
+        return background;
+    }
+
+    private static void addCompactDivider(Activity activity, LinearLayout parent) {
+        View divider = new View(activity);
+        divider.setBackgroundColor(UiTheme.border(activity));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 1));
+        params.leftMargin = dp(activity, 12);
+        params.rightMargin = dp(activity, 12);
+        parent.addView(divider, params);
     }
 
     private static LinearLayout card(Activity activity) {
