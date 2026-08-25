@@ -32,6 +32,7 @@ public final class RouteStatusDialogPage {
     }
 
     static View create(Activity activity, String title, int activeType,
+                       RouteCoordinator.Snapshot snapshot,
                        Runnable onClose, Runnable onSpeedTest) {
         ScrollView scroll = new ScrollView(activity);
         scroll.setFillViewport(true);
