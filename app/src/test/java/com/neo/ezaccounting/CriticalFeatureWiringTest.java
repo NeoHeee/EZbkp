@@ -89,6 +89,16 @@ public class CriticalFeatureWiringTest {
         assertContains(mainActivity, "protected void onPause()");
     }
 
+    @Test
+    public void serverAddressBackReturnsToSettingsCenter() throws IOException {
+        String mainActivity = readProjectFile(
+                "src/main/java/com/neo/ezaccounting/MainActivity.java");
+
+        assertContains(mainActivity, "serverAddressPageVisible = true");
+        assertContains(mainActivity, "if (serverAddressPageVisible)");
+        assertContains(mainActivity, "showSettingsCenter(false)");
+    }
+
     private static String readProjectFile(String relativePath) throws IOException {
         Path path = Paths.get(relativePath);
         if (!Files.exists(path)) path = Paths.get("app").resolve(relativePath);

@@ -74,6 +74,7 @@ public class MainActivity extends FragmentActivity implements
     private long lastBackPressedAt;
     private boolean screenReceiverRegistered;
     private boolean serverSettingsVisible;
+    private boolean serverAddressPageVisible;
     private boolean backgroundStartupProbePending;
     private int consecutivePageFailures;
     private FrameLayout appRoot;
@@ -664,6 +665,7 @@ public class MainActivity extends FragmentActivity implements
     private void showServerSettings() {
         rememberCurrentWebUrl();
         serverSettingsVisible = true;
+        serverAddressPageVisible = true;
         stateBeforeSettings = stateMachine.getState();
         transitionTo(AppStateMachine.State.SETTINGS);
         String activeLocalUrl = routeCoordinator.getActiveType() == RouteManager.TYPE_LOCAL ?
@@ -682,6 +684,7 @@ public class MainActivity extends FragmentActivity implements
                         .apply();
                 routeCoordinator.setAddresses(localUrl, publicUrl);
                 serverSettingsVisible = false;
+                serverAddressPageVisible = false;
                 lastFailure = null;
                 hideOverlay();
                 transitionTo(AppStateMachine.State.CHECKING_ROUTE);
@@ -733,6 +736,7 @@ public class MainActivity extends FragmentActivity implements
     private void showSettingsCenter(boolean refreshServerVersion) {
         rememberCurrentWebUrl();
         serverSettingsVisible = true;
+        serverAddressPageVisible = false;
         stateBeforeSettings = stateMachine.getState();
         transitionTo(AppStateMachine.State.SETTINGS);
         String routeSummary = "自动管理 · " +
@@ -1397,6 +1401,10 @@ public class MainActivity extends FragmentActivity implements
         AppStateMachine.State state = currentAppState();
         if (state == AppStateMachine.State.SETTINGS) {
             if (!routeCoordinator.hasConfiguredRoute()) return false;
+            if (serverAddressPageVisible) {
+                showSettingsCenter(false);
+                return true;
+            }
             serverSettingsVisible = false;
             if (stateBeforeSettings == AppStateMachine.State.ERROR && lastFailure != null) {
                 showErrorPage("返回设置前的连接错误", lastFailure,
