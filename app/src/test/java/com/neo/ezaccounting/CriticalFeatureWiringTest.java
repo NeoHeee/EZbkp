@@ -41,6 +41,7 @@ public class CriticalFeatureWiringTest {
 
         assertContains(mainActivity, "QuickActionsSheet.prewarm(");
         assertContains(mainActivity, "QuickActionsSheet.show(");
+        assertContains(mainActivity, "RouteStatusDialogPage.show(");
         assertContains(mainActivity, "new RouteCoordinator(preferences, this)");
         assertContains(mainActivity,
                 "RouteCoordinator.Trigger.NETWORK_CHANGE");

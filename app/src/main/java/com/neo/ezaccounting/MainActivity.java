@@ -1122,23 +1122,13 @@ public class MainActivity extends FragmentActivity implements
 
     private void showRouteStatusDialog() {
         RouteCoordinator.Snapshot snapshot = routeCoordinator.getLastSnapshot();
-        UiComponents.show(new AlertDialog.Builder(this)
-                .setTitle("线路状态")
-                .setMessage(RoutePresentation.routeStatusText(
-                        routeCoordinator.getActiveType(), snapshot))
-                .setNegativeButton("关闭", null)
-                .setPositiveButton("手动测速", (dialog, which) -> routeCoordinator.manualSpeedTest())
-                .create());
+        RouteStatusDialogPage.show(this, "线路状态",
+                routeCoordinator.getActiveType(), snapshot, routeCoordinator::manualSpeedTest);
     }
 
     private void showSpeedTestDialog(RouteCoordinator.Snapshot snapshot) {
-        UiComponents.show(new AlertDialog.Builder(this)
-                .setTitle("测速完成")
-                .setMessage(RoutePresentation.routeStatusText(
-                        routeCoordinator.getActiveType(), snapshot))
-                .setNegativeButton("关闭", null)
-                .setPositiveButton("再次测速", (dialog, which) -> routeCoordinator.manualSpeedTest())
-                .create());
+        RouteStatusDialogPage.show(this, "测速完成",
+                routeCoordinator.getActiveType(), snapshot, routeCoordinator::manualSpeedTest);
     }
 
     private void lockImmediately() {

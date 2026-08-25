@@ -22,24 +22,4 @@ public final class RoutePresentation {
         return new QuickActionsSheet.Model(routeName(activeType), latency, securityLabel);
     }
 
-    public static String routeStatusText(int activeType,
-                                         RouteCoordinator.Snapshot snapshot) {
-        StringBuilder text = new StringBuilder();
-        text.append("选择方式：自动管理\n");
-        text.append("当前：").append(routeName(activeType)).append('\n');
-        if (snapshot == null) {
-            text.append("\n尚未完成测速");
-            return text.toString();
-        }
-        text.append("网络：").append(snapshot.networkLabel).append('\n');
-        text.append("选线原因：").append(snapshot.decisionReason).append('\n');
-        text.append("\n本地：").append(probeLabel(snapshot.local()));
-        text.append("\n公网：").append(probeLabel(snapshot.publicRoute()));
-        text.append("\n\n自动规则：综合当前网络匹配、延迟和近期稳定性选择线路；网络变化后自动重新评估。");
-        return text.toString();
-    }
-
-    private static String probeLabel(RouteManager.ProbeResult result) {
-        return result == null ? "未检测" : result.label() + " · " + result.diagnostic();
-    }
 }
