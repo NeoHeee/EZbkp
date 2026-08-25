@@ -35,8 +35,8 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Run tests and build debug APK
-        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Run tests and build APKs
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:checkSizeBenchmarkApk
 
       - name: Prepare artifact
         shell: bash

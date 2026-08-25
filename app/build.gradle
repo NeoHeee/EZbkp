@@ -20,8 +20,8 @@ android {
         applicationId 'com.neo.ezaccounting'
         minSdk 26
         targetSdk 35
-        versionCode 28
-        versionName '1.6.7'
+        versionCode 32
+        versionName '1.7.1'
     }
     buildFeatures { buildConfig true }
     signingConfigs {
@@ -41,8 +41,14 @@ android {
     buildTypes {
         release {
             if (hasReleaseSigning) { signingConfig signingConfigs.release }
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        sizeBenchmark {
+            initWith release
+            signingConfig null
+            matchingFallbacks = ['release']
         }
     }
     compileOptions {
@@ -52,9 +58,34 @@ android {
 }
 
 dependencies {
-    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.20')
     implementation 'androidx.activity:activity:1.7.2'
     implementation 'androidx.fragment:fragment:1.6.2'
     implementation 'androidx.biometric:biometric:1.1.0'
+    constraints {
+        implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.8.20'
+        implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.20'
+        implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.20'
+    }
     testImplementation 'junit:junit:4.13.2'
+}
+
+def maxApkSizeBytes = providers.gradleProperty('ledgerly.maxApkSizeBytes')
+        .map { it.toLong() }
+        .getOrElse(2300000L)
+
+tasks.register('checkSizeBenchmarkApk') {
+    dependsOn 'assembleSizeBenchmark'
+    doLast {
+        def outputDir = file("$buildDir/outputs/apk/sizeBenchmark")
+        def apks = fileTree(outputDir).matching { include '*.apk' }.files
+        if (apks.size() != 1) {
+            throw new GradleException("Expected exactly one size benchmark APK in ${outputDir}, found ${apks.size()}.")
+        }
+        def apk = apks.first()
+        def actualBytes = apk.length()
+        logger.lifecycle("Size benchmark APK: ${apk.name} = ${actualBytes} bytes; limit = ${maxApkSizeBytes} bytes")
+        if (actualBytes > maxApkSizeBytes) {
+            throw new GradleException("APK size regression: ${actualBytes} bytes exceeds ${maxApkSizeBytes} bytes.")
+        }
+    }
 }

@@ -187,9 +187,9 @@ public final class ServerSettingsPage {
                     scrollFocusedFieldIntoView(activity, scrollView, fields.ssid, imeState);
                     return;
                 }
-                String normalized = ServerAddressValidator.normalize(raw);
+                String normalized = ServerAddressValidator.normalizeLocal(raw);
                 if (normalized == null) {
-                    fields.url.setError("请输入有效的 HTTP 或 HTTPS 地址");
+                    fields.url.setError("HTTP 仅允许局域网地址；其他地址请使用 HTTPS");
                     fields.url.requestFocus();
                     scrollFocusedFieldIntoView(activity, scrollView, fields.url, imeState);
                     return;
@@ -203,9 +203,9 @@ public final class ServerSettingsPage {
                 scrollFocusedFieldIntoView(activity, scrollView, publicInput, imeState);
                 return;
             }
-            String normalizedPublic = ServerAddressValidator.normalize(publicRaw);
+            String normalizedPublic = ServerAddressValidator.normalizePublic(publicRaw);
             if (!blank(publicRaw) && normalizedPublic == null) {
-                publicInput.setError("请输入有效的 HTTP 或 HTTPS 地址");
+                publicInput.setError("公网地址必须使用 HTTPS");
                 publicInput.requestFocus();
                 scrollFocusedFieldIntoView(activity, scrollView, publicInput, imeState);
                 return;

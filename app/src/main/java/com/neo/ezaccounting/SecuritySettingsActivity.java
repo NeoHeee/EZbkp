@@ -10,6 +10,7 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -37,6 +38,9 @@ public class SecuritySettingsActivity extends FragmentActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (AppSecurity.isEnabled(this)) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        }
         UiTheme.applySystemBars(this);
         showSettings();
     }
@@ -137,6 +141,12 @@ public class SecuritySettingsActivity extends FragmentActivity {
         root.addView(actionDescription("至少连接四个点，需要连续绘制两次确认"),
                 fullWrap(dp(18)));
 
+        Button diagnostic = actionButton("安全状态诊断");
+        root.addView(diagnostic, fullWrap(dp(8)));
+        diagnostic.setOnClickListener(v -> showSecurityDiagnostic());
+        root.addView(actionDescription("仅展示保护策略，不显示地址、Cookie 或凭据"),
+                fullWrap(dp(18)));
+
         Button disable = new Button(this);
         disable.setText("关闭安全验证");
         UiComponents.styleDangerAction(disable);
@@ -153,6 +163,27 @@ public class SecuritySettingsActivity extends FragmentActivity {
 
         refreshSummary();
         setContentView(scrollView);
+    }
+
+    private void showSecurityDiagnostic() {
+        String status = "应用锁：" + AppSecurity.getModeLabel(this) +
+                "\n自动锁定：" + AppSecurity.getRelockTimeoutLabel(this) +
+                "\n熄屏锁定：" + (AppSecurity.isLockOnScreenOff(this) ? "开启" : "关闭") +
+                "\n解锁预加载：" + (AppSecurity.isPreloadWhileLocked(this) ? "开启" : "关闭") +
+                "\n\n隐私保护" +
+                "\n• 应用数据与设备迁移备份：已禁用" +
+                "\n• 验证和后台任务预览：防截屏保护" +
+                "\n• 验证期间 WebView：隐藏且不可交互" +
+                "\n• 第三方 Cookie：已禁用" +
+                "\n\n连接边界" +
+                "\n• 公网地址：仅允许 HTTPS" +
+                "\n• 明文 HTTP：仅允许局域网规则" +
+                "\n• 用户证书：仅限 .local 或 localhost";
+        UiComponents.show(new AlertDialog.Builder(this)
+                .setTitle("安全状态诊断")
+                .setMessage(status)
+                .setPositiveButton("关闭", null)
+                .create());
     }
 
     private TextView sectionTitle(String text) {

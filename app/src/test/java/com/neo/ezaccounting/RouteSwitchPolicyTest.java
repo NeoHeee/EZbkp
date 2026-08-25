@@ -124,7 +124,20 @@ public class RouteSwitchPolicyTest {
         RouteManager.Selection routes = selection(local, local, remote);
         assertFalse(policy.evaluate(RouteManager.TYPE_PUBLIC, routes, 15_000L, true)
                 .shouldSwitch);
-        assertTrue(policy.evaluate(RouteManager.TYPE_PUBLIC, routes, 20_001L, true)
+        assertTrue(policy.evaluate(RouteManager.TYPE_PUBLIC, routes, 40_001L, true)
                 .shouldSwitch);
+    }
+
+    @Test
+    public void pageFailureTriesReachableAlternateBeforeError() {
+        RouteSwitchPolicy policy = new RouteSwitchPolicy();
+        RouteManager.ProbeResult local = route("http://local", RouteManager.TYPE_LOCAL,
+                true, 40);
+        RouteManager.ProbeResult remote = route("https://remote", RouteManager.TYPE_PUBLIC,
+                true, 100);
+        RouteSwitchPolicy.Decision decision = policy.evaluateAfterPageFailure(
+                RouteManager.TYPE_LOCAL, selection(local, local, remote), 20_000L, true);
+        assertTrue(decision.shouldSwitch);
+        assertEquals(remote, decision.target);
     }
 }

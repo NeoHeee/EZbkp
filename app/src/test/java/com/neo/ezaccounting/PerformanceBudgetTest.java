@@ -8,6 +8,7 @@ import static org.junit.Assert.assertTrue;
 public class PerformanceBudgetTest {
     private static final int ITERATIONS = 50_000;
     private static final long POLICY_BUDGET_MS = 2_000L;
+    private static final long PIPELINE_BOOKKEEPING_BUDGET_MS = 500L;
 
     @Test
     public void coldStartRouteDecisionStaysWithinBudget() {
@@ -53,6 +54,23 @@ public class PerformanceBudgetTest {
         }
         assertNotNull(selected);
         assertWithinBudget("线路切换评分", started);
+    }
+
+    @Test
+    public void startupPipelineBookkeepingDoesNotConsumeFirstFrameBudget() {
+        long started = System.nanoTime();
+        for (int index = 0; index < ITERATIONS; index++) {
+            StartupPipeline pipeline = new StartupPipeline(index);
+            pipeline.advance(StartupPipeline.Stage.ROUTE_READY, index + 1L);
+            pipeline.advance(StartupPipeline.Stage.WEBVIEW_READY, index + 2L);
+            pipeline.advance(StartupPipeline.Stage.HOME_REQUESTED, index + 3L);
+            pipeline.advance(StartupPipeline.Stage.HTML_READY, index + 4L);
+            pipeline.advance(StartupPipeline.Stage.CONTENT_READY, index + 5L);
+        }
+        long elapsedMs = (System.nanoTime() - started) / 1_000_000L;
+        assertTrue("启动流水线记录耗时 " + elapsedMs + " ms，超过预算 " +
+                PIPELINE_BOOKKEEPING_BUDGET_MS + " ms",
+                elapsedMs <= PIPELINE_BOOKKEEPING_BUDGET_MS);
     }
 
     private void assertWithinBudget(String operation, long startedNanos) {

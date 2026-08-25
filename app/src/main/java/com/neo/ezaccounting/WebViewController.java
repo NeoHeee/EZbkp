@@ -20,6 +20,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebViewDatabase;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 
@@ -61,6 +62,8 @@ public final class WebViewController {
     }
 
     public interface Host {
+        void onWebViewInitialized();
+        void onHomeRequestStarted();
         boolean onNavigationRequested(Uri uri);
         void onFileChooserRequested(ValueCallback<Uri[]> callback,
                                     WebChromeClient.FileChooserParams params);
@@ -76,7 +79,8 @@ public final class WebViewController {
             new WeakReference<>(null);
     private static final ExecutorService metadataExecutor = Executors.newSingleThreadExecutor();
     private static final long CONTENT_READY_POLL_MS = 120L;
-    private static final long CONTENT_READY_TIMEOUT_MS = 15_000L;
+    private static final long CONTENT_READY_TIMEOUT_MS =
+            StartupPipeline.CONTENT_READY_SOFT_LIMIT_MS;
 
     private final Activity activity;
     private final Host host;
@@ -88,6 +92,7 @@ public final class WebViewController {
     private boolean pageReady;
     private boolean mainFrameFailed;
     private final PageIdentityCache pageIdentityCache = new PageIdentityCache();
+    private final PagePositionCache pagePositionCache = new PagePositionCache();
     private boolean identityCheckInProgress;
     private final List<ValueCallback<EzBookkeepingPageDetector.PageIdentity>>
             pendingIdentityCallbacks = new ArrayList<>();
@@ -131,6 +136,7 @@ public final class WebViewController {
         webView.setBackgroundColor(UiTheme.webBackground(activity));
         webView.setContentDescription("记账页面");
         webView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        applyInteractionState();
         root.addView(webView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         pageProgress = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
@@ -150,6 +156,7 @@ public final class WebViewController {
 
         configure();
         setupHiddenGesture();
+        host.onWebViewInitialized();
         boolean restored = restoredState != null && webView.restoreState(restoredState) != null;
         if (restored) {
             pageLoadGeneration++;
@@ -163,6 +170,7 @@ public final class WebViewController {
                 scheduleContentReadyCheck(pageLoadGeneration, currentUrl());
             });
         } else {
+            host.onHomeRequestStarted();
             loadUrl(initialUrl == null || initialUrl.trim().isEmpty() ? baseUrl : initialUrl);
         }
         return root;
@@ -171,12 +179,7 @@ public final class WebViewController {
     public void setPreloadMode(boolean enabled) {
         preloadMode = enabled;
         if (webView == null) return;
-        webView.setEnabled(!enabled);
-        webView.setFocusable(!enabled);
-        webView.setFocusableInTouchMode(!enabled);
-        webView.setImportantForAccessibility(enabled ?
-                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS :
-                View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        applyInteractionState();
         if (!enabled && pageReady) {
             syncPageTheme();
             refreshPageIdentity();
@@ -337,6 +340,7 @@ public final class WebViewController {
 
     public void loadUrl(String url) {
         if (webView == null || url == null || url.trim().isEmpty()) return;
+        rememberPagePosition();
         pageReady = false;
         pageIdentityCache.invalidate();
         webView.loadUrl(url);
@@ -344,6 +348,7 @@ public final class WebViewController {
 
     public void reload() {
         if (webView != null) {
+            rememberPagePosition();
             pageReady = false;
             pageIdentityCache.invalidate();
             webView.reload();
@@ -355,17 +360,28 @@ public final class WebViewController {
     }
 
     public void goBack() {
-        if (webView != null) webView.goBack();
+        if (webView != null) {
+            rememberPagePosition();
+            webView.goBack();
+        }
     }
 
-    public void clearSiteData() {
-        CookieManager.getInstance().removeAllCookies(null);
-        CookieManager.getInstance().flush();
+    public void clearSiteData(Runnable completion) {
         WebStorage.getInstance().deleteAllData();
+        WebViewDatabase database = WebViewDatabase.getInstance(activity);
+        database.clearHttpAuthUsernamePassword();
+        database.clearFormData();
+        pagePositionCache.clear();
         if (webView != null) {
             webView.clearCache(true);
             webView.clearHistory();
+            webView.clearFormData();
+            webView.clearSslPreferences();
         }
+        CookieManager.getInstance().removeAllCookies(removed -> {
+            CookieManager.getInstance().flush();
+            if (completion != null) completion.run();
+        });
     }
 
     public String webViewPackageName() {
@@ -406,16 +422,18 @@ public final class WebViewController {
                 + " Ledgerly/" + BuildConfig.VERSION_NAME);
 
         CookieManager.getInstance().setAcceptCookie(true);
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                rememberPagePosition();
                 return host.onNavigationRequested(request.getUrl());
             }
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                rememberPagePosition();
                 return host.onNavigationRequested(Uri.parse(url));
             }
 
@@ -441,6 +459,7 @@ public final class WebViewController {
                 syncPageTheme();
                 if (!preloadMode) refreshPageIdentity();
                 host.onPageReady(url);
+                restorePagePosition(url);
                 pageFinishedAt = SystemClock.elapsedRealtime();
                 scheduleContentReadyCheck(pageLoadGeneration, url);
             }
@@ -657,7 +676,9 @@ public final class WebViewController {
         }
         active.evaluateJavascript("(function(){try{" +
                 "if(document.readyState!=='complete')return false;" +
-                "return document.querySelectorAll('.skeleton-text').length===0;" +
+                "var q='.skeleton-text,.v-skeleton-loader__bone,[aria-busy=\"true\"],[class*=\"skeleton\"]';" +
+                "return !Array.from(document.querySelectorAll(q)).some(function(e){" +
+                "return e.offsetParent!==null&&getComputedStyle(e).visibility!=='hidden';});" +
                 "}catch(e){return false;}})();", value -> {
             if (active != webView || generation != pageLoadGeneration || contentReady) return;
             if ("true".equals(value)) contentReadyConfirmations++;
@@ -687,6 +708,33 @@ public final class WebViewController {
         for (ValueCallback<EzBookkeepingPageDetector.PageIdentity> callback : callbacks) {
             callback.onReceiveValue(identity);
         }
+    }
+
+    private void applyInteractionState() {
+        if (webView == null) return;
+        webView.setEnabled(!preloadMode);
+        webView.setFocusable(!preloadMode);
+        webView.setFocusableInTouchMode(!preloadMode);
+        webView.setImportantForAccessibility(preloadMode ?
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS :
+                View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+    }
+
+    public void rememberPagePosition() {
+        WebView active = webView;
+        if (active == null || !pageReady) return;
+        pagePositionCache.save(active.getUrl(), active.getScrollX(), active.getScrollY());
+    }
+
+    private void restorePagePosition(String url) {
+        WebView active = webView;
+        PagePositionCache.Position position = pagePositionCache.get(url);
+        if (active == null || position == null) return;
+        active.postOnAnimation(() -> active.postOnAnimation(() -> {
+            if (active == webView && url != null && url.equals(active.getUrl())) {
+                active.scrollTo(position.x, position.y);
+            }
+        }));
     }
 
     private boolean movedTooMuch(MotionEvent event) {

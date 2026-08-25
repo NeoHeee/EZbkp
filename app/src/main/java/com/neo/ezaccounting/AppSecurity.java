@@ -152,6 +152,10 @@ public final class AppSecurity {
         return Math.max(0L, remaining);
     }
 
+    public static int getFailedAttempts(Context context) {
+        return Math.max(0, prefs(context).getInt(KEY_FAILED_ATTEMPTS, 0));
+    }
+
     public static void resetFailedAttempts(Context context) {
         prefs(context).edit()
                 .remove(KEY_FAILED_ATTEMPTS)

@@ -2,7 +2,7 @@ package com.neo.ezaccounting;
 
 public final class RouteSwitchPolicy {
     static final int FAILURE_THRESHOLD = 2;
-    static final long LOCAL_RETRY_HOLD_MS = 10_000L;
+    static final long LOCAL_RETRY_HOLD_MS = 30_000L;
 
     public static final class Decision {
         public final boolean shouldSwitch;
@@ -99,6 +99,17 @@ public final class RouteSwitchPolicy {
             return Decision.switchTo(recommended, "当前 Wi-Fi 命中局域网地址");
         }
         return Decision.stay("当前线路可用，不因测速结果主动切换");
+    }
+
+    public Decision evaluateAfterPageFailure(int activeType, RouteManager.Selection selection,
+                                             long now, boolean activeRouteEligible) {
+        if (selection != null) {
+            RouteManager.ProbeResult alternate = alternateFor(activeType, selection);
+            if (alternate != null && alternate.reachable) {
+                return Decision.switchTo(alternate, "当前页面加载失败，已先尝试另一线路");
+            }
+        }
+        return evaluate(activeType, selection, now, activeRouteEligible);
     }
 
     private RouteManager.ProbeResult resultFor(int type, RouteManager.Selection selection) {

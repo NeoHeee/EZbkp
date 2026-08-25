@@ -204,7 +204,8 @@ public class LockActivity extends FragmentActivity {
         if (delay > 0) refreshLockoutState();
         else {
             setVerificationInProgress(false, null);
-            message.setText(pattern ? "图形错误" : "密码错误");
+            message.setText(LockPolicy.failedAttemptMessage(pattern,
+                    AppSecurity.getFailedAttempts(this)));
         }
     }
 
@@ -222,7 +223,8 @@ public class LockActivity extends FragmentActivity {
         }
 
         long seconds = Math.max(1L, (remaining + 999L) / 1000L);
-        message.setText("尝试次数过多，请在 " + seconds + " 秒后重试");
+        message.setText("已连续失败 " + AppSecurity.getFailedAttempts(this) +
+                " 次，请等待 " + seconds + " 秒后重试");
         lockoutHandler.postDelayed(lockoutTick, Math.min(1000L, remaining));
     }
 
