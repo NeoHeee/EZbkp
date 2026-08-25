@@ -9,7 +9,7 @@
     <!-- User-installed CAs are restricted to explicit local hostnames. -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">local</domain>
-        <domain>localhost</domain>
+        <domain includeSubdomains="false">localhost</domain>
         <trust-anchors>
             <certificates src="system" />
             <certificates src="user" />
