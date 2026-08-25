@@ -46,6 +46,20 @@ public class CriticalFeatureWiringTest {
                 "RouteCoordinator.Trigger.NETWORK_CHANGE");
     }
 
+    @Test
+    public void startupPipelineAndPageRestoreRemainConnected() throws IOException {
+        String mainActivity = readProjectFile(
+                "src/main/java/com/neo/ezaccounting/MainActivity.java");
+        String webViewController = readProjectFile(
+                "src/main/java/com/neo/ezaccounting/WebViewController.java");
+
+        assertContains(mainActivity, "postDelayed(unlockPreload, UNLOCK_PRELOAD_DELAY_MS)");
+        assertContains(mainActivity, "StartupPipeline.Stage.CONTENT_READY");
+        assertContains(mainActivity, "quickActionsListener");
+        assertContains(webViewController, "rememberPagePosition()");
+        assertContains(webViewController, "restorePagePosition(url)");
+    }
+
     private static String readProjectFile(String relativePath) throws IOException {
         Path path = Paths.get(relativePath);
         if (!Files.exists(path)) path = Paths.get("app").resolve(relativePath);

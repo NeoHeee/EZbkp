@@ -9,6 +9,8 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
+import android.os.SystemClock;
+import android.util.Log;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -75,12 +77,14 @@ public final class QuickActionsSheet {
         View panel;
         Listener listener;
         boolean prewarming;
+        boolean firstShow = true;
 
         CachedSheet(Activity activity) {
             this.activity = activity;
         }
 
         void show(Model model, Listener nextListener) {
+            long startedAt = SystemClock.elapsedRealtime();
             prewarming = false;
             listener = nextListener;
             route.setText(model.route);
@@ -89,6 +93,16 @@ public final class QuickActionsSheet {
             restoreVisibleWindow(activity, dialog);
             dialog.show();
             animateIn(panel);
+            View decor = dialog.getWindow() == null ? null : dialog.getWindow().getDecorView();
+            if (decor != null) decor.postOnAnimation(() -> {
+                long elapsed = SystemClock.elapsedRealtime() - startedAt;
+                Log.i("LedgerlyStartup", "quick_center_first_frame_ms=" + elapsed +
+                        " first_show=" + firstShow + " budget_ms=" +
+                        StartupPipeline.QUICK_CENTER_FIRST_FRAME_BUDGET_MS +
+                        " within_budget=" +
+                        (elapsed <= StartupPipeline.QUICK_CENTER_FIRST_FRAME_BUDGET_MS));
+                firstShow = false;
+            });
         }
 
         void prewarm() {
