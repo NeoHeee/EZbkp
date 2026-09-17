@@ -42,14 +42,21 @@ public class EzBookkeepingPageDetectorTest {
     }
 
     @Test
-    public void scriptTargetsOnlyCurrentPageOwnedByMainView() {
+    public void scriptUsesRouterAndVersionCompatibleHomeMarkers() {
         String script = EzBookkeepingPageDetector.homeDetectionScript();
         assertTrue(script.contains("getElementById('main-view')"));
         assertTrue(script.contains("querySelectorAll('.page-current')"));
         assertTrue(script.contains("closest('.view')===view"));
+        assertTrue(script.contains("view.f7View.router.currentRoute"));
+        assertTrue(script.contains("page.f7Page.route"));
+        assertTrue(script.contains("path.substring(hashAt+1)"));
+        assertTrue(script.contains("new URL(path,location.href).pathname"));
+        assertTrue(script.contains("path==='/')"));
+        assertTrue(script.contains(".main-tabbar"));
+        assertTrue(script.contains("#homepage-add-button"));
         assertTrue(script.contains(".home-summary-card"));
         assertTrue(script.contains(".overview-transaction-list"));
-        assertTrue(script.contains("?'home':'other'"));
+        assertTrue(script.contains("hasLegacyHomeWidgets?'home':'other'"));
         assertTrue(script.contains("return 'unknown'"));
         assertFalse(script.contains("document.querySelector('.page-current')"));
     }
