@@ -49,6 +49,7 @@ public class MainActivity extends FragmentActivity implements
     private static final String KEY_PUBLIC_URL = "public_url";
     private static final String KEY_LAST_UPDATE_CHECK = "last_update_check";
     private static final String KEY_SHOW_QUICK_ACTIONS = "show_quick_actions";
+    private static final String KEY_CLOUDFLARE_PREFERRED_IP = "cloudflare_preferred_ip";
     private static final String STATE_KEY = "app_state";
     private static final String WEB_URL_KEY = "web_url";
     private static final String BASE_URL_KEY = "base_url";
@@ -98,6 +99,8 @@ public class MainActivity extends FragmentActivity implements
             android.os.SystemClock.elapsedRealtime());
     private QuickActionsSheet.Model cachedQuickActionsModel;
     private final ConnectionPrewarmer connectionPrewarmer = new ConnectionPrewarmer();
+    private final CloudflareDiagnosticManager cloudflareDiagnosticManager =
+            new CloudflareDiagnosticManager();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private AppStateMachine stateMachine;
@@ -149,6 +152,8 @@ public class MainActivity extends FragmentActivity implements
     private ValueCallback<Uri[]> filePathCallback;
     private Uri pendingCameraUri;
     private WebViewController.Failure lastFailure;
+    private CloudflareDiagnosticManager.Report cloudflareDiagnosticReport;
+    private boolean cloudflareDiagnosticRunning;
 
     private final ActivityResultLauncher<Intent> appUnlockLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
@@ -260,6 +265,9 @@ public class MainActivity extends FragmentActivity implements
             public void onNetworkChanging() {
                 if (routeCoordinator != null) routeCoordinator.cancelForNetworkChange();
                 connectionPrewarmer.cancel();
+                cloudflareDiagnosticManager.cancel();
+                cloudflareDiagnosticRunning = false;
+                cloudflareDiagnosticReport = null;
             }
 
             @Override
@@ -1132,12 +1140,49 @@ public class MainActivity extends FragmentActivity implements
     private void showRouteStatusDialog() {
         RouteCoordinator.Snapshot snapshot = routeCoordinator.getLastSnapshot();
         RouteStatusDialogPage.show(this, "线路状态",
-                routeCoordinator.getActiveType(), snapshot, routeCoordinator::manualSpeedTest);
+                routeCoordinator.getActiveType(), snapshot, routeCoordinator::manualSpeedTest,
+                this::showCloudflareDiagnostic);
     }
 
     private void showSpeedTestDialog(RouteCoordinator.Snapshot snapshot) {
         RouteStatusDialogPage.show(this, "测速完成",
-                routeCoordinator.getActiveType(), snapshot, routeCoordinator::manualSpeedTest);
+                routeCoordinator.getActiveType(), snapshot, routeCoordinator::manualSpeedTest,
+                this::showCloudflareDiagnostic);
+    }
+
+    private void showCloudflareDiagnostic() {
+        String preferredIp = preferences.getString(KEY_CLOUDFLARE_PREFERRED_IP, "");
+        CloudflareDiagnosticDialogPage.show(this, preferredIp, cloudflareDiagnosticReport,
+                cloudflareDiagnosticRunning, this::runCloudflareDiagnostic);
+    }
+
+    private void runCloudflareDiagnostic(String preferredIp) {
+        String normalized = CloudflareDiagnosticManager.normalizePublicIp(preferredIp);
+        if (!preferredIp.trim().isEmpty() && normalized == null) {
+            Toast.makeText(this, "请输入有效的公网 IPv4 或 IPv6 地址",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String stored = normalized == null ? "" : normalized;
+        preferences.edit().putString(KEY_CLOUDFLARE_PREFERRED_IP, stored).apply();
+        if (publicUrl == null || publicUrl.trim().isEmpty()) {
+            Toast.makeText(this, "请先配置 HTTPS 公网地址", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        cloudflareDiagnosticRunning = true;
+        cloudflareDiagnosticReport = null;
+        Toast.makeText(this, "正在进行 Cloudflare 线路诊断…", Toast.LENGTH_SHORT).show();
+        NetworkState state = networkMonitor == null ? NetworkState.none() :
+                networkMonitor.currentState();
+        cloudflareDiagnosticManager.diagnose(publicUrl, stored, state, report -> {
+            if (isFinishing() || isDestroyed()) return;
+            cloudflareDiagnosticRunning = false;
+            cloudflareDiagnosticReport = report;
+            if (stateMachine.getState() != AppStateMachine.State.LOCKED &&
+                    !lifecycleCoordinator.isAuthInProgress()) {
+                showCloudflareDiagnostic();
+            }
+        });
     }
 
     private void lockImmediately() {
@@ -1485,6 +1530,8 @@ public class MainActivity extends FragmentActivity implements
     @Override
     protected void onStop() {
         if (webViewController != null) webViewController.rememberPagePosition();
+        cloudflareDiagnosticManager.cancel();
+        cloudflareDiagnosticRunning = false;
         if (networkMonitor != null) networkMonitor.stop();
         if (downloadController != null) downloadController.unregister();
         if (lifecycleCoordinator != null) {
@@ -1532,6 +1579,7 @@ public class MainActivity extends FragmentActivity implements
     protected void onDestroy() {
         mainHandler.removeCallbacksAndMessages(null);
         connectionPrewarmer.shutdown();
+        cloudflareDiagnosticManager.shutdown();
         getWindow().getDecorView().removeCallbacks(backgroundStartupProbe);
         getWindow().getDecorView().removeCallbacks(progressivePageRetry);
         getWindow().getDecorView().removeCallbacks(quickActionsPrewarm);

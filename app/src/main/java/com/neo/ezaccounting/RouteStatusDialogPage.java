@@ -16,7 +16,8 @@ public final class RouteStatusDialogPage {
     private RouteStatusDialogPage() {}
 
     public static void show(Activity activity, String title, int activeType,
-                            RouteCoordinator.Snapshot snapshot, Runnable onSpeedTest) {
+                            RouteCoordinator.Snapshot snapshot, Runnable onSpeedTest,
+                            Runnable onCloudflareDiagnostic) {
         if (activity == null || activity.isFinishing()) return;
         final AlertDialog[] holder = new AlertDialog[1];
         View content = create(activity, title, activeType, snapshot,
@@ -25,6 +26,9 @@ public final class RouteStatusDialogPage {
                 }, () -> {
                     if (holder[0] != null) holder[0].dismiss();
                     if (onSpeedTest != null) onSpeedTest.run();
+                }, () -> {
+                    if (holder[0] != null) holder[0].dismiss();
+                    if (onCloudflareDiagnostic != null) onCloudflareDiagnostic.run();
                 });
         AlertDialog dialog = new AlertDialog.Builder(activity).setView(content).create();
         holder[0] = dialog;
@@ -33,7 +37,8 @@ public final class RouteStatusDialogPage {
 
     static View create(Activity activity, String title, int activeType,
                        RouteCoordinator.Snapshot snapshot,
-                       Runnable onClose, Runnable onSpeedTest) {
+                       Runnable onClose, Runnable onSpeedTest,
+                       Runnable onCloudflareDiagnostic) {
         LinearLayout outer = new LinearLayout(activity);
         outer.setOrientation(LinearLayout.VERTICAL);
         outer.setBackgroundColor(UiTheme.surface(activity));
@@ -91,6 +96,14 @@ public final class RouteStatusDialogPage {
                 snapshot == null ? null : snapshot.local()), fullWrap(activity, 8));
         root.addView(routeCard(activity, "公网线路",
                 snapshot == null ? null : snapshot.publicRoute()), fullWrap(activity, 4));
+
+        Button cloudflare = new Button(activity);
+        cloudflare.setText("Cloudflare 线路诊断");
+        UiComponents.styleSecondary(cloudflare);
+        cloudflare.setOnClickListener(view -> {
+            if (onCloudflareDiagnostic != null) onCloudflareDiagnostic.run();
+        });
+        root.addView(cloudflare, fullWrap(activity, 6));
 
         LinearLayout buttons = new LinearLayout(activity);
         buttons.setOrientation(LinearLayout.HORIZONTAL);

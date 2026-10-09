@@ -70,6 +70,11 @@ public class CriticalFeatureWiringTest {
         assertContains(routeStatus, "查看详情");
         assertContains(routeStatus, "outer.addView(buttons");
         assertContains(routeStatus, "phases.addView(metricCell(activity, \"HTTP\"");
+        assertContains(routeStatus, "Cloudflare 线路诊断");
+        String cloudflareDialog = readProjectFile(
+                "src/main/java/com/neo/ezaccounting/CloudflareDiagnosticDialogPage.java");
+        assertContains(cloudflareDialog, "不会改变网页连接");
+        assertContains(cloudflareDialog, "normalizePublicIp");
     }
 
     @Test
