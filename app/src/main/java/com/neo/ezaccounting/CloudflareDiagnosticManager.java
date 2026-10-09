@@ -88,7 +88,7 @@ public final class CloudflareDiagnosticManager {
         }
 
         public String conclusion() {
-            return conclusion(normal, preferred);
+            return CloudflareDiagnosticManager.conclusion(normal, preferred);
         }
     }
 
